@@ -44,15 +44,16 @@ public class OrderController {
     public OrderResponse confirmOrder(@PathVariable Long id) {
         return orderService.confirmOrder(id);
     }
-
     @PatchMapping("/{id}/cancel")
     public OrderResponse cancelOrder(@PathVariable Long id) {
-        return orderService.cancelOrder(id);
+
+        return orderService.cancelOrderById(id);
     }
+
 
     @PatchMapping("/{id}/ship")
     public OrderResponse shipOrder(@PathVariable Long id) {
-        return orderService.shipOrder(id);
+        return orderService.shipOrderById(id);
     }
 
     @DeleteMapping("/{id}")

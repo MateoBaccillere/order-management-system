@@ -68,11 +68,6 @@ public class OrderService {
     public OrderResponse confirmOrder(Long id) {
         Order order = getOrderOrThrow(id);
 
-        if (order.getStatus() == OrderStatus.CONFIRMED) {
-            throw new InvalidOrderStateTransitionException(
-                    "Order is already confirmed"
-            );
-        }
         if (order.getStatus() != OrderStatus.CREATED) {
             throw new InvalidOrderStateTransitionException(
                     "Only orders in CREATED status can be confirmed"
