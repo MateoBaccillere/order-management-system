@@ -1,9 +1,7 @@
 package com.mateo_baccillere.orders.service;
 
-import com.mateo_baccillere.orders.dto.CreateOrderItemRequest;
-import com.mateo_baccillere.orders.dto.CreateOrderRequest;
-import com.mateo_baccillere.orders.dto.OrderItemResponse;
-import com.mateo_baccillere.orders.dto.OrderResponse;
+import com.mateo_baccillere.orders.client.NotificationClient;
+import com.mateo_baccillere.orders.dto.*;
 import com.mateo_baccillere.orders.entity.Order;
 import com.mateo_baccillere.orders.entity.OrderItem;
 import com.mateo_baccillere.orders.entity.OrderStatus;
@@ -21,9 +19,11 @@ import java.util.Optional;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final NotificationClient notificationClient;
 
-    public OrderService(OrderRepository orderRepository) {
+    public OrderService(OrderRepository orderRepository, NotificationClient notificationClient) {
         this.orderRepository = orderRepository;
+        this.notificationClient = notificationClient;
     }
 
     @Transactional
@@ -81,7 +81,19 @@ public class OrderService {
 
         order.setStatus(OrderStatus.CONFIRMED);
         Order savedOrder = orderRepository.save(order);
+
+        notificationClient.sendNotification(
+                new NotificationRequest(
+                        savedOrder.getId(),
+                        "ORDER_CONFIRMED",
+                        "Order " + savedOrder.getId() + " was confirmed"
+                )
+        );
+
         return mapToResponse(savedOrder);
+
+
+
     }
 
     @Transactional
@@ -96,6 +108,14 @@ public class OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
+        notificationClient.sendNotification(
+                new NotificationRequest(
+                        savedOrder.getId(),
+                        "ORDER_CANCELLED",
+                        "Order " + savedOrder.getId() + " was cancelled"
+                )
+        );
+
         return mapToResponse(savedOrder);
     }
 
@@ -111,6 +131,15 @@ public class OrderService {
 
         order.setStatus(OrderStatus.SHIPPED);
         Order savedOrder = orderRepository.save(order);
+
+        notificationClient.sendNotification(
+                new NotificationRequest(
+                        savedOrder.getId(),
+                        "ORDER_SHIPPED",
+                        "Order " + savedOrder.getId() + " was shipped"
+                )
+        );
+
         return mapToResponse(savedOrder);
     }
 
