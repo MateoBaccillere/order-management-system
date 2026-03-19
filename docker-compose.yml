@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: order-management-postgres
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  notification-service:
+    build:
+      context: ./notification-service/notification-service
+    container_name: notification-service
+    ports:
+      - "8081:8081"
+
+  order-service:
+    build:
+      context: ./order-service/order-service
+    container_name: order-service
+    depends_on:
+      - postgres
+      - notification-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/order_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      NOTIFICATION_SERVICE_URL: http://notification-service:8081
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
