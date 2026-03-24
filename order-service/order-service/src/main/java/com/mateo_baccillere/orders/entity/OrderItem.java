@@ -1,10 +1,7 @@
 package com.mateo_baccillere.orders.entity;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.math.BigDecimal;
 
@@ -14,6 +11,7 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @Builder
 @Table(name = "order_item")
+@Data
 public class OrderItem {
 
 

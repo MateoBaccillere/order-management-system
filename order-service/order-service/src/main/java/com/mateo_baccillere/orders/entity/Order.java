@@ -2,11 +2,12 @@ package com.mateo_baccillere.orders.entity;
 
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @AllArgsConstructor
@@ -14,6 +15,7 @@ import java.util.List;
 @Builder
 @Entity
 @Table(name = "orders")
+@Data
 public class Order {
 
 
@@ -28,11 +30,17 @@ public class Order {
     private OrderStatus status;
 
     @Column(name = "total_amount")
-    private double totalAmount;
+    private BigDecimal totalAmount;
+
+
     @Column(name = "created_at")
-    private Long createdAt;
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+
+
     @Column(name = "updated_at")
-    private Long updatedAt;
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items;
