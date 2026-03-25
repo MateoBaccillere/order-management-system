@@ -1,12 +1,14 @@
 package com.mateo_baccillere.orders.service;
 
 import com.mateo_baccillere.orders.client.NotificationClient;
+import com.mateo_baccillere.orders.client.ProductClient;
 import com.mateo_baccillere.orders.dto.*;
 import com.mateo_baccillere.orders.entity.Order;
 import com.mateo_baccillere.orders.entity.OrderItem;
 import com.mateo_baccillere.orders.entity.OrderStatus;
 import com.mateo_baccillere.orders.exception.InvalidOrderStateTransitionException;
 import com.mateo_baccillere.orders.exception.OrderNotFoundException;
+import com.mateo_baccillere.orders.exception.ProductUnavailableException;
 import com.mateo_baccillere.orders.repository.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
@@ -20,10 +22,16 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final NotificationClient notificationClient;
+    private final ProductClient productClient;
 
-    public OrderService(OrderRepository orderRepository, NotificationClient notificationClient) {
+    public OrderService(
+            OrderRepository orderRepository,
+            NotificationClient notificationClient,
+            ProductClient productClient
+    ) {
         this.orderRepository = orderRepository;
         this.notificationClient = notificationClient;
+        this.productClient = productClient;
     }
 
     @Transactional
@@ -34,7 +42,7 @@ public class OrderService {
 
         List<OrderItem> items = request.getItems()
                 .stream()
-                .map(itemRequest -> mapToOrderItem(itemRequest, order))
+                .map(itemRequest -> buildValidatedOrderItem(itemRequest, order))
                 .toList();
 
         BigDecimal totalAmount = items.stream()
@@ -69,18 +77,17 @@ public class OrderService {
         Order order = getOrderOrThrow(id);
 
         if (order.getStatus() == OrderStatus.CONFIRMED) {
-            throw new InvalidOrderStateTransitionException(
-                    "Order is already confirmed"
-            );
+            throw new InvalidOrderStateTransitionException("Order is already confirmed");
         }
+
         if (order.getStatus() != OrderStatus.CREATED) {
             throw new InvalidOrderStateTransitionException(
                     "Only orders in CREATED status can be confirmed"
             );
         }
 
-        order.setStatus(OrderStatus.CONFIRMED);
         Order savedOrder = orderRepository.save(order);
+        savedOrder.setStatus(OrderStatus.CONFIRMED);
 
         notificationClient.sendNotification(
                 new NotificationRequest(
@@ -91,9 +98,6 @@ public class OrderService {
         );
 
         return mapToResponse(savedOrder);
-
-
-
     }
 
     @Transactional
@@ -108,6 +112,7 @@ public class OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
+
         notificationClient.sendNotification(
                 new NotificationRequest(
                         savedOrder.getId(),
@@ -144,24 +149,41 @@ public class OrderService {
     }
 
     public void deleteOrderById(Long id) {
-
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new OrderNotFoundException(id));
 
         orderRepository.delete(order);
-
     }
 
+    private OrderItem buildValidatedOrderItem(CreateOrderItemRequest request, Order order) {
+        ProductDetailsResponse product = productClient.getProductById(request.getProductId());
 
-    private OrderItem mapToOrderItem(CreateOrderItemRequest request, Order order) {
-        OrderItem item = new OrderItem();
-        item.setProductName(request.getProductName());
-        item.setQuantity(request.getQuantity());
-        item.setUnitPrice(request.getUnitPrice());
+        if (product == null) {
+            throw new ProductUnavailableException(
+                    "Product not found with id: " + request.getProductId()
+            );
+        }
 
-        BigDecimal subtotal = request.getUnitPrice()
+        if (Boolean.FALSE.equals(product.getActive())) {
+            throw new ProductUnavailableException(
+                    "Product is inactive with id: " + request.getProductId()
+            );
+        }
+
+        if (product.getStock() == null || request.getQuantity() > product.getStock()) {
+            throw new ProductUnavailableException(
+                    "Insufficient stock for product id: " + request.getProductId()
+            );
+        }
+
+        BigDecimal subtotal = product.getPrice()
                 .multiply(BigDecimal.valueOf(request.getQuantity()));
 
+        OrderItem item = new OrderItem();
+        item.setProductId(product.getId());
+        item.setProductName(product.getName());
+        item.setQuantity(request.getQuantity());
+        item.setUnitPrice(product.getPrice());
         item.setSubtotal(subtotal);
         item.setOrder(order);
 

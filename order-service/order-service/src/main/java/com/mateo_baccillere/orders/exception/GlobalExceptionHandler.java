@@ -43,6 +43,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(body);
     }
 
+    @ExceptionHandler(ProductUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleProductUnavailable(ProductUnavailableException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", 400);
+        body.put("error", "Bad Request");
+        body.put("message", ex.getMessage());
+
+        return ResponseEntity.badRequest().body(body);
+    }
+
     @ExceptionHandler(InvalidOrderStateTransitionException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidTransition(InvalidOrderStateTransitionException ex) {
         Map<String, Object> body = new HashMap<>();
