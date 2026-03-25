@@ -11,8 +11,6 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "products")
-@AllArgsConstructor
-@NoArgsConstructor
 @Data
 public class Product {
 
@@ -34,4 +32,7 @@ public class Product {
 
     @Column(nullable = false)
     private Boolean active;
+
+    public Product(String name, String description, BigDecimal price, Integer stock, Boolean active) {
+    }
 }
