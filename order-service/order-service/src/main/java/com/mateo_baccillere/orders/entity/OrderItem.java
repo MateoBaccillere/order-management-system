@@ -19,6 +19,8 @@ public class OrderItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "product_id", nullable = false)
+    private Long productId;
     @Column(name = "product_name")
     private String productName;
     private int quantity;
