@@ -14,7 +14,6 @@ public class CartResponse {
 
     private Long id;
     private String customerName;
-    private String status;
     private BigDecimal totalAmount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

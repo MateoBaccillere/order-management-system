@@ -29,10 +29,6 @@ public class Cart {
     @Column(name = "customer_name", nullable = false)
     private String customerName;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private CartStatus status;
-
     @Column(name = "total_amount", nullable = false)
     private BigDecimal totalAmount;
 
