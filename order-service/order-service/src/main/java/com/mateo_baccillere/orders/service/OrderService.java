@@ -22,53 +22,48 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final NotificationClient notificationClient;
-    private final ProductClient productClient;
+    private final CatalogProductValidationService catalogProductValidationService;
+    private final OrderCreationService orderCreationService;
 
     public OrderService(
             OrderRepository orderRepository,
             NotificationClient notificationClient,
-            ProductClient productClient
+            CatalogProductValidationService catalogProductValidationService,
+            OrderCreationService orderCreationService
     ) {
         this.orderRepository = orderRepository;
         this.notificationClient = notificationClient;
-        this.productClient = productClient;
+        this.catalogProductValidationService = catalogProductValidationService;
+        this.orderCreationService = orderCreationService;
     }
 
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest request) {
-        Order order = new Order();
-        order.setCustomerName(request.getCustomerName());
-        order.setStatus(OrderStatus.CREATED);
-
-        List<OrderItem> items = request.getItems()
+        List<ValidatedProductSnapshot> validatedItems = request.getItems()
                 .stream()
-                .map(itemRequest -> buildValidatedOrderItem(itemRequest, order))
+                .map(item -> catalogProductValidationService.validateAndSnapshot(
+                        item.getProductId(),
+                        item.getQuantity()
+                ))
                 .toList();
 
-        BigDecimal totalAmount = items.stream()
-                .map(OrderItem::getSubtotal)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        order.setItems(items);
-        order.setTotalAmount(totalAmount);
-
-        Order savedOrder = orderRepository.save(order);
-        return mapToResponse(savedOrder);
+        return orderCreationService.createOrderFromValidatedItems(
+                request.getCustomerName(),
+                validatedItems
+        );
     }
 
     @Transactional(readOnly = true)
     public OrderResponse getOrderById(Long id) {
-        Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new OrderNotFoundException(id));
-
-        return mapToResponse(order);
+        Order order = getOrderOrThrow(id);
+        return orderCreationService.mapToResponse(order);
     }
 
     @Transactional(readOnly = true)
     public List<OrderResponse> getAllOrders() {
         return orderRepository.findAll()
                 .stream()
-                .map(this::mapToResponse)
+                .map(orderCreationService::mapToResponse)
                 .toList();
     }
 
@@ -86,8 +81,8 @@ public class OrderService {
             );
         }
 
+        order.setStatus(OrderStatus.CONFIRMED);
         Order savedOrder = orderRepository.save(order);
-        savedOrder.setStatus(OrderStatus.CONFIRMED);
 
         notificationClient.sendNotification(
                 new NotificationRequest(
@@ -97,7 +92,7 @@ public class OrderService {
                 )
         );
 
-        return mapToResponse(savedOrder);
+        return orderCreationService.mapToResponse(savedOrder);
     }
 
     @Transactional
@@ -121,7 +116,7 @@ public class OrderService {
                 )
         );
 
-        return mapToResponse(savedOrder);
+        return orderCreationService.mapToResponse(savedOrder);
     }
 
     @Transactional
@@ -145,72 +140,13 @@ public class OrderService {
                 )
         );
 
-        return mapToResponse(savedOrder);
+        return orderCreationService.mapToResponse(savedOrder);
     }
 
+    @Transactional
     public void deleteOrderById(Long id) {
-        Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new OrderNotFoundException(id));
-
+        Order order = getOrderOrThrow(id);
         orderRepository.delete(order);
-    }
-
-    private OrderItem buildValidatedOrderItem(CreateOrderItemRequest request, Order order) {
-        ProductDetailsResponse product = productClient.getProductById(request.getProductId());
-
-        if (product == null) {
-            throw new ProductUnavailableException(
-                    "Product not found with id: " + request.getProductId()
-            );
-        }
-
-        if (Boolean.FALSE.equals(product.getActive())) {
-            throw new ProductUnavailableException(
-                    "Product is inactive with id: " + request.getProductId()
-            );
-        }
-
-        if (product.getStock() == null || request.getQuantity() > product.getStock()) {
-            throw new ProductUnavailableException(
-                    "Insufficient stock for product id: " + request.getProductId()
-            );
-        }
-
-        BigDecimal subtotal = product.getPrice()
-                .multiply(BigDecimal.valueOf(request.getQuantity()));
-
-        OrderItem item = new OrderItem();
-        item.setProductId(product.getId());
-        item.setProductName(product.getName());
-        item.setQuantity(request.getQuantity());
-        item.setUnitPrice(product.getPrice());
-        item.setSubtotal(subtotal);
-        item.setOrder(order);
-
-        return item;
-    }
-
-    private OrderResponse mapToResponse(Order order) {
-        List<OrderItemResponse> items = order.getItems()
-                .stream()
-                .map(item -> new OrderItemResponse(
-                        item.getId(),
-                        item.getProductName(),
-                        item.getQuantity(),
-                        item.getUnitPrice(),
-                        item.getSubtotal()
-                ))
-                .toList();
-
-        return new OrderResponse(
-                order.getId(),
-                order.getCustomerName(),
-                order.getStatus().name(),
-                order.getTotalAmount(),
-                order.getCreatedAt(),
-                order.getUpdatedAt(),
-                items
-        );
     }
 
     private Order getOrderOrThrow(Long id) {
