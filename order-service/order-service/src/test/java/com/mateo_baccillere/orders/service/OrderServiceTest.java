@@ -2,18 +2,14 @@ package com.mateo_baccillere.orders.service;
 
 
 import com.mateo_baccillere.orders.client.NotificationClient;
-import com.mateo_baccillere.orders.client.ProductClient;
 import com.mateo_baccillere.orders.dto.CreateOrderItemRequest;
 import com.mateo_baccillere.orders.dto.CreateOrderRequest;
 import com.mateo_baccillere.orders.dto.NotificationRequest;
 import com.mateo_baccillere.orders.dto.OrderResponse;
-import com.mateo_baccillere.orders.dto.ProductDetailsResponse;
 import com.mateo_baccillere.orders.entity.Order;
-import com.mateo_baccillere.orders.entity.OrderItem;
 import com.mateo_baccillere.orders.entity.OrderStatus;
 import com.mateo_baccillere.orders.exception.InvalidOrderStateTransitionException;
 import com.mateo_baccillere.orders.exception.OrderNotFoundException;
-import com.mateo_baccillere.orders.exception.ProductUnavailableException;
 import com.mateo_baccillere.orders.repository.OrderRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,13 +36,16 @@ public class OrderServiceTest {
     private NotificationClient notificationClient;
 
     @Mock
-    private ProductClient productClient;
+    private CatalogProductValidationService catalogProductValidationService;
+
+    @Mock
+    private OrderCreationService orderCreationService;
 
     @InjectMocks
     private OrderService orderService;
 
     @Test
-    void shouldCreateOrderAndCalculateTotalAmountUsingCatalogData() {
+    void shouldCreateOrderUsingValidatedSnapshots() {
         CreateOrderItemRequest item1 = new CreateOrderItemRequest();
         item1.setProductId(1L);
         item1.setQuantity(2);
@@ -59,24 +58,27 @@ public class OrderServiceTest {
         request.setCustomerName("Juan Perez");
         request.setItems(List.of(item1, item2));
 
-        when(productClient.getProductById(1L)).thenReturn(
-                buildProduct(1L, "Keyboard", "50.00", 10, true)
+        ValidatedProductSnapshot snapshot1 = new ValidatedProductSnapshot(
+                1L, "Keyboard", 2, new BigDecimal("50.00"), new BigDecimal("100.00")
         );
-        when(productClient.getProductById(2L)).thenReturn(
-                buildProduct(2L, "Mouse", "25.00", 5, true)
+        ValidatedProductSnapshot snapshot2 = new ValidatedProductSnapshot(
+                2L, "Mouse", 1, new BigDecimal("25.00"), new BigDecimal("25.00")
         );
 
-        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
-            Order order = invocation.getArgument(0);
-            order.setId(1L);
+        OrderResponse expectedResponse = new OrderResponse(
+                1L,
+                "Juan Perez",
+                "CREATED",
+                new BigDecimal("125.00"),
+                null,
+                null,
+                List.of()
+        );
 
-            long itemId = 1L;
-            for (OrderItem item : order.getItems()) {
-                item.setId(itemId++);
-            }
-
-            return order;
-        });
+        when(catalogProductValidationService.validateAndSnapshot(1L, 2)).thenReturn(snapshot1);
+        when(catalogProductValidationService.validateAndSnapshot(2L, 1)).thenReturn(snapshot2);
+        when(orderCreationService.createOrderFromValidatedItems("Juan Perez", List.of(snapshot1, snapshot2)))
+                .thenReturn(expectedResponse);
 
         OrderResponse response = orderService.createOrder(request);
 
@@ -84,96 +86,61 @@ public class OrderServiceTest {
         assertEquals("Juan Perez", response.getCustomerName());
         assertEquals("CREATED", response.getStatus());
         assertEquals(new BigDecimal("125.00"), response.getTotalAmount());
-        assertEquals(2, response.getItems().size());
 
-        assertEquals("Keyboard", response.getItems().get(0).getProductName());
-        assertEquals(new BigDecimal("50.00"), response.getItems().get(0).getUnitPrice());
-        assertEquals(new BigDecimal("100.00"), response.getItems().get(0).getSubtotal());
-
-        assertEquals("Mouse", response.getItems().get(1).getProductName());
-        assertEquals(new BigDecimal("25.00"), response.getItems().get(1).getUnitPrice());
-        assertEquals(new BigDecimal("25.00"), response.getItems().get(1).getSubtotal());
-
-        verify(productClient).getProductById(1L);
-        verify(productClient).getProductById(2L);
-        verify(orderRepository, times(1)).save(any(Order.class));
+        verify(catalogProductValidationService).validateAndSnapshot(1L, 2);
+        verify(catalogProductValidationService).validateAndSnapshot(2L, 1);
+        verify(orderCreationService).createOrderFromValidatedItems("Juan Perez", List.of(snapshot1, snapshot2));
         verifyNoInteractions(notificationClient);
+        verifyNoInteractions(orderRepository);
     }
 
     @Test
-    void shouldThrowExceptionWhenProductDoesNotExist() {
-        CreateOrderItemRequest item = new CreateOrderItemRequest();
-        item.setProductId(99L);
-        item.setQuantity(1);
+    void shouldGetOrderById() {
+        Order order = buildOrder(1L, OrderStatus.CREATED);
 
-        CreateOrderRequest request = new CreateOrderRequest();
-        request.setCustomerName("Juan Perez");
-        request.setItems(List.of(item));
-
-        when(productClient.getProductById(99L)).thenReturn(null);
-
-        ProductUnavailableException ex = assertThrows(
-                ProductUnavailableException.class,
-                () -> orderService.createOrder(request)
+        OrderResponse mappedResponse = new OrderResponse(
+                1L,
+                "Juan Perez",
+                "CREATED",
+                new BigDecimal("125.00"),
+                null,
+                null,
+                List.of()
         );
 
-        assertEquals("Product not found with id: 99", ex.getMessage());
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderCreationService.mapToResponse(order)).thenReturn(mappedResponse);
 
-        verify(productClient).getProductById(99L);
-        verify(orderRepository, never()).save(any(Order.class));
-        verifyNoInteractions(notificationClient);
+        OrderResponse response = orderService.getOrderById(1L);
+
+        assertEquals(1L, response.getId());
+        assertEquals("CREATED", response.getStatus());
+
+        verify(orderRepository).findById(1L);
+        verify(orderCreationService).mapToResponse(order);
     }
 
     @Test
-    void shouldThrowExceptionWhenProductIsInactive() {
-        CreateOrderItemRequest item = new CreateOrderItemRequest();
-        item.setProductId(1L);
-        item.setQuantity(1);
+    void shouldGetAllOrders() {
+        Order order1 = buildOrder(1L, OrderStatus.CREATED);
+        Order order2 = buildOrder(2L, OrderStatus.CONFIRMED);
 
-        CreateOrderRequest request = new CreateOrderRequest();
-        request.setCustomerName("Juan Perez");
-        request.setItems(List.of(item));
-
-        when(productClient.getProductById(1L)).thenReturn(
-                buildProduct(1L, "Keyboard", "50.00", 10, false)
+        OrderResponse response1 = new OrderResponse(
+                1L, "Juan Perez", "CREATED", new BigDecimal("125.00"), null, null, List.of()
+        );
+        OrderResponse response2 = new OrderResponse(
+                2L, "Ana Lopez", "CONFIRMED", new BigDecimal("80.00"), null, null, List.of()
         );
 
-        ProductUnavailableException ex = assertThrows(
-                ProductUnavailableException.class,
-                () -> orderService.createOrder(request)
-        );
+        when(orderRepository.findAll()).thenReturn(List.of(order1, order2));
+        when(orderCreationService.mapToResponse(order1)).thenReturn(response1);
+        when(orderCreationService.mapToResponse(order2)).thenReturn(response2);
 
-        assertEquals("Product is inactive with id: 1", ex.getMessage());
+        List<OrderResponse> responses = orderService.getAllOrders();
 
-        verify(productClient).getProductById(1L);
-        verify(orderRepository, never()).save(any(Order.class));
-        verifyNoInteractions(notificationClient);
-    }
-
-    @Test
-    void shouldThrowExceptionWhenStockIsInsufficient() {
-        CreateOrderItemRequest item = new CreateOrderItemRequest();
-        item.setProductId(1L);
-        item.setQuantity(20);
-
-        CreateOrderRequest request = new CreateOrderRequest();
-        request.setCustomerName("Juan Perez");
-        request.setItems(List.of(item));
-
-        when(productClient.getProductById(1L)).thenReturn(
-                buildProduct(1L, "Keyboard", "50.00", 5, true)
-        );
-
-        ProductUnavailableException ex = assertThrows(
-                ProductUnavailableException.class,
-                () -> orderService.createOrder(request)
-        );
-
-        assertEquals("Insufficient stock for product id: 1", ex.getMessage());
-
-        verify(productClient).getProductById(1L);
-        verify(orderRepository, never()).save(any(Order.class));
-        verifyNoInteractions(notificationClient);
+        assertEquals(2, responses.size());
+        assertEquals("CREATED", responses.get(0).getStatus());
+        assertEquals("CONFIRMED", responses.get(1).getStatus());
     }
 
     @Test
@@ -182,6 +149,9 @@ public class OrderServiceTest {
 
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderCreationService.mapToResponse(order)).thenReturn(
+                new OrderResponse(1L, "Juan Perez", "CONFIRMED", new BigDecimal("125.00"), null, null, List.of())
+        );
 
         OrderResponse response = orderService.confirmOrder(1L);
 
@@ -196,11 +166,29 @@ public class OrderServiceTest {
     }
 
     @Test
+    void shouldThrowExceptionWhenConfirmingAlreadyConfirmedOrder() {
+        Order order = buildOrder(1L, OrderStatus.CONFIRMED);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+
+        InvalidOrderStateTransitionException ex = assertThrows(
+                InvalidOrderStateTransitionException.class,
+                () -> orderService.confirmOrder(1L)
+        );
+
+        assertEquals("Order is already confirmed", ex.getMessage());
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(notificationClient);
+    }
+
+    @Test
     void shouldCancelOrderWhenStatusIsCreated() {
         Order order = buildOrder(1L, OrderStatus.CREATED);
 
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderCreationService.mapToResponse(order)).thenReturn(
+                new OrderResponse(1L, "Juan Perez", "CANCELLED", new BigDecimal("125.00"), null, null, List.of())
+        );
 
         OrderResponse response = orderService.cancelOrder(1L);
 
@@ -210,8 +198,38 @@ public class OrderServiceTest {
         verify(notificationClient).sendNotification(captor.capture());
 
         NotificationRequest notification = captor.getValue();
-        assertEquals(1L, notification.getOrderId());
         assertEquals("ORDER_CANCELLED", notification.getEventType());
+    }
+
+    @Test
+    void shouldCancelOrderWhenStatusIsConfirmed() {
+        Order order = buildOrder(1L, OrderStatus.CONFIRMED);
+
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderCreationService.mapToResponse(order)).thenReturn(
+                new OrderResponse(1L, "Juan Perez", "CANCELLED", new BigDecimal("125.00"), null, null, List.of())
+        );
+
+        OrderResponse response = orderService.cancelOrder(1L);
+
+        assertEquals("CANCELLED", response.getStatus());
+        verify(notificationClient).sendNotification(any(NotificationRequest.class));
+    }
+
+    @Test
+    void shouldThrowExceptionWhenCancellingShippedOrder() {
+        Order order = buildOrder(1L, OrderStatus.SHIPPED);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+
+        InvalidOrderStateTransitionException ex = assertThrows(
+                InvalidOrderStateTransitionException.class,
+                () -> orderService.cancelOrder(1L)
+        );
+
+        assertEquals("Only orders in CREATED or CONFIRMED status can be cancelled", ex.getMessage());
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(notificationClient);
     }
 
     @Test
@@ -220,6 +238,9 @@ public class OrderServiceTest {
 
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderCreationService.mapToResponse(order)).thenReturn(
+                new OrderResponse(1L, "Juan Perez", "SHIPPED", new BigDecimal("125.00"), null, null, List.of())
+        );
 
         OrderResponse response = orderService.shipOrder(1L);
 
@@ -229,20 +250,32 @@ public class OrderServiceTest {
         verify(notificationClient).sendNotification(captor.capture());
 
         NotificationRequest notification = captor.getValue();
-        assertEquals(1L, notification.getOrderId());
         assertEquals("ORDER_SHIPPED", notification.getEventType());
     }
 
     @Test
     void shouldThrowExceptionWhenShippingCreatedOrder() {
         Order order = buildOrder(1L, OrderStatus.CREATED);
-
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
 
-        assertThrows(InvalidOrderStateTransitionException.class, () -> orderService.shipOrder(1L));
+        InvalidOrderStateTransitionException ex = assertThrows(
+                InvalidOrderStateTransitionException.class,
+                () -> orderService.shipOrder(1L)
+        );
 
-        verify(orderRepository, never()).save(any(Order.class));
+        assertEquals("Only orders in CONFIRMED status can be shipped", ex.getMessage());
+        verify(orderRepository, never()).save(any());
         verifyNoInteractions(notificationClient);
+    }
+
+    @Test
+    void shouldDeleteOrderById() {
+        Order order = buildOrder(1L, OrderStatus.CREATED);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+
+        orderService.deleteOrderById(1L);
+
+        verify(orderRepository).delete(order);
     }
 
     @Test
@@ -251,7 +284,7 @@ public class OrderServiceTest {
 
         assertThrows(OrderNotFoundException.class, () -> orderService.confirmOrder(99L));
 
-        verify(orderRepository, never()).save(any(Order.class));
+        verify(orderRepository, never()).save(any());
         verifyNoInteractions(notificationClient);
     }
 
@@ -262,24 +295,7 @@ public class OrderServiceTest {
         order.setStatus(status);
         order.setTotalAmount(new BigDecimal("125.00"));
         order.setItems(List.of());
-
         return order;
-    }
-
-    private ProductDetailsResponse buildProduct(
-            Long id,
-            String name,
-            String price,
-            Integer stock,
-            Boolean active
-    ) {
-        ProductDetailsResponse product = new ProductDetailsResponse();
-        product.setId(id);
-        product.setName(name);
-        product.setPrice(new BigDecimal(price));
-        product.setStock(stock);
-        product.setActive(active);
-        return product;
     }
 
 }
