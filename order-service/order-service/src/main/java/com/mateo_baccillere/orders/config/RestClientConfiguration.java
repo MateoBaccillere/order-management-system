@@ -17,4 +17,13 @@ public class RestClientConfiguration {
                 .baseUrl(notificationServiceUrl)
                 .build();
     }
+
+    @Bean
+    public RestClient productRestClient(
+            @Value("${clients.product-service.base-url}") String productServiceUrl
+    ) {
+        return RestClient.builder()
+                .baseUrl(productServiceUrl)
+                .build();
+    }
 }
