@@ -8,18 +8,26 @@ pipeline {
             }
         }
 
-        stage('Build Order Service') {
+        stage('Build and Test Product Service') {
             steps {
-                dir('order-service/order-service') {
-                    bat 'mvnw.cmd clean compile'
+                dir('product-service/product-service') {
+                    bat 'mvnw.cmd clean test'
                 }
             }
         }
 
-        stage('Test Order Service') {
+        stage('Package Product Service') {
+            steps {
+                dir('product-service/product-service') {
+                    bat 'mvnw.cmd package -DskipTests'
+                }
+            }
+        }
+
+        stage('Build and Test Order Service') {
             steps {
                 dir('order-service/order-service') {
-                    bat 'mvnw.cmd test'
+                    bat 'mvnw.cmd clean test'
                 }
             }
         }
@@ -27,7 +35,7 @@ pipeline {
         stage('Package Order Service') {
             steps {
                 dir('order-service/order-service') {
-                    bat 'mvnw.cmd clean package -DskipTests'
+                    bat 'mvnw.cmd package -DskipTests'
                 }
             }
         }
