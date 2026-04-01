@@ -457,6 +457,61 @@ The client calls:
 - persists changes
 - sends notification
 
+# Shipping flow
+
+## Current MVP flow after Week 1
+
+The system already supports:
+
+- product management in `product-service`
+- cart operations inside `order-service`
+- checkout creating an order in `CREATED`
+- order lifecycle managed by `order-service`
+- notifications through `notification-service`
+
+## Week 2 flow extension with `shipping-service`
+
+The next functional flow is defined as follows:
+
+1. buyer selects products and manages cart
+2. buyer performs checkout
+3. `order-service` creates the order with status `CREATED`
+4. seller or admin confirms the order
+5. `order-service` changes order status to `CONFIRMED`
+6. `shipping-service` may create a shipment only for a `CONFIRMED` order
+7. shipment starts in `PENDING`
+8. seller or admin advances shipment through:
+   - `READY_FOR_DELIVERY`
+   - `IN_TRANSIT`
+   - `DELIVERED`
+9. when shipment reaches `DELIVERED`, `shipping-service` calls `order-service`
+10. `order-service` changes the related order status to `SHIPPED`
+11. both services notify `notification-service` for their respective domain events
+
+## Important lifecycle rule
+
+The order status `SHIPPED` is no longer treated as an isolated manual step in `order-service`.  
+It is now a derived business result triggered by shipment delivery confirmation.
+
+## Failure and cancellation handling
+
+If a shipment reaches `FAILED`, the order is not automatically cancelled.  
+Shipment failure and order cancellation are treated as different business concepts.
+
+If shipment is cancelled before delivery, the shipment lifecycle ends in `CANCELLED`, while order handling remains subject to explicit business action in `order-service`.
+
+## API transition style
+
+Shipment transitions are command-based through explicit `PATCH` endpoints.  
+The API does not expose a generic `"set shipment status"` operation.
+
+### Examples
+
+- `PATCH /api/shipments/{id}/ready`
+- `PATCH /api/shipments/{id}/in-transit`
+- `PATCH /api/shipments/{id}/deliver`
+- `PATCH /api/shipments/{id}/fail`
+- `PATCH /api/shipments/{id}/cancel`
 # 5. Notification Flow
 
 ## Goal
@@ -640,3 +695,4 @@ At the end of Week 1, the integrated baseline of the project is:
 This is the functional baseline that prepares the project for the next planned growth step:
 
 - `shipping-service` in Week 2
+

@@ -265,6 +265,80 @@ Terminal states:
 - `CANCELLED`
 - `SHIPPED`
 
+
+# Week 2 architecture decision: shipping integration
+
+## Decision
+
+The project keeps the current MVP integration strategy based on synchronous HTTP communication between services.
+
+For Week 2, `shipping-service` will be introduced as a standalone microservice and integrated directly with `order-service`.
+
+## Chosen interaction model
+
+The selected model is:
+
+- `shipping-service` validates order state through `order-service`
+- `shipping-service` creates and manages shipment lifecycle independently
+- when shipment becomes `DELIVERED`, `shipping-service` calls `order-service`
+- `order-service` updates the order status to `SHIPPED`
+- both services notify `notification-service` independently for their own domain events
+
+## Why this approach was chosen
+
+This approach was selected because it:
+
+- preserves the existing MVP architecture
+- avoids premature infrastructure complexity
+- keeps service responsibilities explicit
+- provides a clear portfolio-visible collaboration between microservices
+- fits the current project rule of synchronous communication and minimal reproducible DevOps
+
+## Advantages
+
+- simple to implement and test
+- clear ownership between order and shipment domains
+- no broker or event infrastructure required
+- consistent with the current Docker and Jenkins setup
+- easy to explain and demonstrate
+
+## Disadvantages
+
+- tighter runtime coupling between `shipping-service` and `order-service`
+- partial failure risk if shipment is delivered but the order update call fails
+- requires idempotent handling for order shipping updates
+
+## Rejected alternatives
+
+### Polling from `order-service`
+
+Rejected because it adds unnecessary scheduling complexity for the MVP.
+
+### Event-driven messaging
+
+Rejected for Week 2 because it introduces infrastructure and operational complexity too early.
+
+### Keeping order shipping fully inside `order-service`
+
+Rejected because it weakens the purpose of `shipping-service` and produces a less accurate business model.
+
+## Infrastructure impact
+
+The infrastructure remains intentionally simple:
+
+- Docker Compose with all services
+- shared PostgreSQL instance
+- internal Docker networking
+- Jenkins build/test/package per service
+- no broker
+- no service discovery
+- no deployment automation yet
+
+## Authorization note
+
+All state-changing endpoints for product, order and shipment lifecycle are considered operational endpoints and must be restricted to `SELLER` and `ADMIN`.  
+`BUYER` only performs customer-facing actions and read operations.
+
 ## Persistence
 
 ### order-service
