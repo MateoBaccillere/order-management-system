@@ -58,4 +58,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidOrderState(InvalidOrderStateException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
+    @ExceptionHandler(InvalidShipmentStateTransitionException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidShipmentStateTransition(
+            InvalidShipmentStateTransitionException ex
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(OrderServiceIntegrationException.class)
+    public ResponseEntity<ErrorResponse> handleOrderServiceIntegration(OrderServiceIntegrationException ex) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
 }

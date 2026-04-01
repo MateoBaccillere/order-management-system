@@ -24,20 +24,42 @@ public class ShipmentController {
     @PostMapping
     public ResponseEntity<ShipmentResponse> createShipment(@Valid @RequestBody CreateShipmentRequest request) {
         ShipmentResponse response = shipmentService.createShipment(request);
-
         URI location = URI.create("/api/shipments/" + response.id());
         return ResponseEntity.created(location).body(response);
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<ShipmentResponse> getShipmentById(@PathVariable Long id) {
-        ShipmentResponse response = shipmentService.getShipmentById(id);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(shipmentService.getShipmentById(id));
     }
 
     @GetMapping("/order/{orderId}")
     public ResponseEntity<ShipmentResponse> getShipmentByOrderId(@PathVariable Long orderId) {
-        ShipmentResponse response = shipmentService.getShipmentByOrderId(orderId);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(shipmentService.getShipmentByOrderId(orderId));
+    }
+
+    @PatchMapping("/{id}/ready")
+    public ResponseEntity<ShipmentResponse> markReadyForDelivery(@PathVariable Long id) {
+        return ResponseEntity.ok(shipmentService.markReadyForDelivery(id));
+    }
+
+    @PatchMapping("/{id}/in-transit")
+    public ResponseEntity<ShipmentResponse> markInTransit(@PathVariable Long id) {
+        return ResponseEntity.ok(shipmentService.markInTransit(id));
+    }
+
+    @PatchMapping("/{id}/deliver")
+    public ResponseEntity<ShipmentResponse> markDelivered(@PathVariable Long id) {
+        return ResponseEntity.ok(shipmentService.markDelivered(id));
+    }
+
+    @PatchMapping("/{id}/fail")
+    public ResponseEntity<ShipmentResponse> markFailed(@PathVariable Long id) {
+        return ResponseEntity.ok(shipmentService.markFailed(id));
+    }
+
+    @PatchMapping("/{id}/cancel")
+    public ResponseEntity<ShipmentResponse> cancelShipment(@PathVariable Long id) {
+        return ResponseEntity.ok(shipmentService.cancelShipment(id));
     }
 }
