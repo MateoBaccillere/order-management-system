@@ -6,7 +6,10 @@ import com.mateo_baccillere.shipping.dto.ShipmentResponse;
 import com.mateo_baccillere.shipping.service.ShipmentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.net.URI;
 
 @RestController
 @RequestMapping("/api/shipments")
@@ -19,18 +22,22 @@ public class ShipmentController {
     }
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public ShipmentResponse createShipment(@Valid @RequestBody CreateShipmentRequest request) {
-        return shipmentService.createShipment(request);
+    public ResponseEntity<ShipmentResponse> createShipment(@Valid @RequestBody CreateShipmentRequest request) {
+        ShipmentResponse response = shipmentService.createShipment(request);
+
+        URI location = URI.create("/api/shipments/" + response.id());
+        return ResponseEntity.created(location).body(response);
     }
 
     @GetMapping("/{id}")
-    public ShipmentResponse getShipmentById(@PathVariable Long id) {
-        return shipmentService.getShipmentById(id);
+    public ResponseEntity<ShipmentResponse> getShipmentById(@PathVariable Long id) {
+        ShipmentResponse response = shipmentService.getShipmentById(id);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/order/{orderId}")
-    public ShipmentResponse getShipmentByOrderId(@PathVariable Long orderId) {
-        return shipmentService.getShipmentByOrderId(orderId);
+    public ResponseEntity<ShipmentResponse> getShipmentByOrderId(@PathVariable Long orderId) {
+        ShipmentResponse response = shipmentService.getShipmentByOrderId(orderId);
+        return ResponseEntity.ok(response);
     }
 }
