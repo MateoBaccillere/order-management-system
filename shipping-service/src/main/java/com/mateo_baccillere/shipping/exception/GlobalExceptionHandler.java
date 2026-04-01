@@ -69,4 +69,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleOrderServiceIntegration(OrderServiceIntegrationException ex) {
         return buildResponse(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
+    @ExceptionHandler(NotificationServiceIntegrationException.class)
+    public ResponseEntity<ErrorResponse> handleNotificationServiceIntegration(
+            NotificationServiceIntegrationException ex
+    ) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
 }

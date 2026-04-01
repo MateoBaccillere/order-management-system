@@ -1,16 +1,15 @@
 package com.mateo_baccillere.shipping.service;
 
 
+import com.mateo_baccillere.shipping.client.NotificationClient;
 import com.mateo_baccillere.shipping.client.OrderClient;
 import com.mateo_baccillere.shipping.domain.Shipment;
 import com.mateo_baccillere.shipping.domain.ShipmentStatus;
 import com.mateo_baccillere.shipping.dto.CreateShipmentRequest;
+import com.mateo_baccillere.shipping.dto.NotificationRequest;
 import com.mateo_baccillere.shipping.dto.OrderResponse;
 import com.mateo_baccillere.shipping.dto.ShipmentResponse;
-import com.mateo_baccillere.shipping.exception.DuplicateShipmentException;
-import com.mateo_baccillere.shipping.exception.InvalidOrderStateException;
-import com.mateo_baccillere.shipping.exception.InvalidShipmentStateTransitionException;
-import com.mateo_baccillere.shipping.exception.ShipmentNotFoundException;
+import com.mateo_baccillere.shipping.exception.*;
 import com.mateo_baccillere.shipping.mapper.ShipmentMapper;
 import com.mateo_baccillere.shipping.repository.ShipmentRepository;
 import org.springframework.stereotype.Service;
@@ -22,10 +21,16 @@ public class ShipmentService {
 
     private final ShipmentRepository shipmentRepository;
     private final OrderClient orderClient;
+    private final NotificationClient notificationClient;
 
-    public ShipmentService(ShipmentRepository shipmentRepository, OrderClient orderClient) {
+    public ShipmentService(
+            ShipmentRepository shipmentRepository,
+            OrderClient orderClient,
+            NotificationClient notificationClient
+    ) {
         this.shipmentRepository = shipmentRepository;
         this.orderClient = orderClient;
+        this.notificationClient = notificationClient;
     }
 
     public ShipmentResponse createShipment(CreateShipmentRequest request) {
@@ -36,7 +41,9 @@ public class ShipmentService {
         OrderResponse order = orderClient.getOrderById(request.orderId());
 
         if (order == null) {
-            throw new IllegalStateException("Order-service returned null response for order id: " + request.orderId());
+            throw new OrderServiceIntegrationException(
+                    "Order-service returned null response for order id: " + request.orderId()
+            );
         }
 
         if (!"CONFIRMED".equalsIgnoreCase(order.status())) {
@@ -51,6 +58,13 @@ public class ShipmentService {
                 .build();
 
         Shipment savedShipment = shipmentRepository.save(shipment);
+
+        sendShipmentNotification(
+                savedShipment,
+                "SHIPMENT_CREATED",
+                "Shipment " + savedShipment.getId() + " was created for order " + savedShipment.getOrderId()
+        );
+
         return ShipmentMapper.toResponse(savedShipment);
     }
 
@@ -78,7 +92,15 @@ public class ShipmentService {
                 "Shipment can only move to READY_FOR_DELIVERY from PENDING"
         );
 
-        return updateStatus(shipment, ShipmentStatus.READY_FOR_DELIVERY);
+        Shipment updatedShipment = updateStatusEntity(shipment, ShipmentStatus.READY_FOR_DELIVERY);
+
+        sendShipmentNotification(
+                updatedShipment,
+                "SHIPMENT_READY_FOR_DELIVERY",
+                "Shipment " + updatedShipment.getId() + " is ready for delivery"
+        );
+
+        return ShipmentMapper.toResponse(updatedShipment);
     }
 
     public ShipmentResponse markInTransit(Long shipmentId) {
@@ -89,7 +111,15 @@ public class ShipmentService {
                 "Shipment can only move to IN_TRANSIT from READY_FOR_DELIVERY"
         );
 
-        return updateStatus(shipment, ShipmentStatus.IN_TRANSIT);
+        Shipment updatedShipment = updateStatusEntity(shipment, ShipmentStatus.IN_TRANSIT);
+
+        sendShipmentNotification(
+                updatedShipment,
+                "SHIPMENT_IN_TRANSIT",
+                "Shipment " + updatedShipment.getId() + " is in transit"
+        );
+
+        return ShipmentMapper.toResponse(updatedShipment);
     }
 
     public ShipmentResponse markDelivered(Long shipmentId) {
@@ -100,11 +130,17 @@ public class ShipmentService {
                 "Shipment can only move to DELIVERED from IN_TRANSIT"
         );
 
-        ShipmentResponse response = updateStatus(shipment, ShipmentStatus.DELIVERED);
+        Shipment updatedShipment = updateStatusEntity(shipment, ShipmentStatus.DELIVERED);
 
-        orderClient.markOrderAsShipped(shipment.getOrderId());
+        sendShipmentNotification(
+                updatedShipment,
+                "SHIPMENT_DELIVERED",
+                "Shipment " + updatedShipment.getId() + " was delivered"
+        );
 
-        return response;
+        orderClient.markOrderAsShipped(updatedShipment.getOrderId());
+
+        return ShipmentMapper.toResponse(updatedShipment);
     }
 
     public ShipmentResponse markFailed(Long shipmentId) {
@@ -115,7 +151,15 @@ public class ShipmentService {
                 "Shipment can only move to FAILED from IN_TRANSIT"
         );
 
-        return updateStatus(shipment, ShipmentStatus.FAILED);
+        Shipment updatedShipment = updateStatusEntity(shipment, ShipmentStatus.FAILED);
+
+        sendShipmentNotification(
+                updatedShipment,
+                "SHIPMENT_FAILED",
+                "Shipment " + updatedShipment.getId() + " failed during delivery"
+        );
+
+        return ShipmentMapper.toResponse(updatedShipment);
     }
 
     public ShipmentResponse cancelShipment(Long shipmentId) {
@@ -127,7 +171,15 @@ public class ShipmentService {
                 "Shipment can only be cancelled from PENDING or READY_FOR_DELIVERY"
         );
 
-        return updateStatus(shipment, ShipmentStatus.CANCELLED);
+        Shipment updatedShipment = updateStatusEntity(shipment, ShipmentStatus.CANCELLED);
+
+        sendShipmentNotification(
+                updatedShipment,
+                "SHIPMENT_CANCELLED",
+                "Shipment " + updatedShipment.getId() + " was cancelled"
+        );
+
+        return ShipmentMapper.toResponse(updatedShipment);
     }
 
     private Shipment findShipmentById(Long shipmentId) {
@@ -141,10 +193,19 @@ public class ShipmentService {
         }
     }
 
-    private ShipmentResponse updateStatus(Shipment shipment, ShipmentStatus newStatus) {
+    private Shipment updateStatusEntity(Shipment shipment, ShipmentStatus newStatus) {
         shipment.setStatus(newStatus);
-        Shipment updatedShipment = shipmentRepository.save(shipment);
-        return ShipmentMapper.toResponse(updatedShipment);
+        return shipmentRepository.save(shipment);
+    }
+
+    private void sendShipmentNotification(Shipment shipment, String type, String message) {
+        notificationClient.sendNotification(
+                new NotificationRequest(
+                        shipment.getId(),
+                        type,
+                        message
+                )
+        );
     }
 
 }
