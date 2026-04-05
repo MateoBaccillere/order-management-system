@@ -123,24 +123,36 @@ public class OrderService {
     public OrderResponse shipOrder(Long id) {
         Order order = getOrderOrThrow(id);
 
+        if (order.getStatus() == OrderStatus.SHIPPED) {
+            return orderCreationService.mapToResponse(order);
+        }
+
+        validateOrderCanBeShipped(order);
+
+        order.setStatus(OrderStatus.SHIPPED);
+        Order savedOrder = orderRepository.save(order);
+
+        sendOrderShippedNotification(savedOrder);
+
+        return orderCreationService.mapToResponse(savedOrder);
+    }
+
+    private void validateOrderCanBeShipped(Order order) {
         if (order.getStatus() != OrderStatus.CONFIRMED) {
             throw new InvalidOrderStateTransitionException(
                     "Only orders in CONFIRMED status can be shipped"
             );
         }
+    }
 
-        order.setStatus(OrderStatus.SHIPPED);
-        Order savedOrder = orderRepository.save(order);
-
+    private void sendOrderShippedNotification(Order order) {
         notificationClient.sendNotification(
                 new NotificationRequest(
-                        savedOrder.getId(),
+                        order.getId(),
                         "ORDER_SHIPPED",
-                        "Order " + savedOrder.getId() + " was shipped"
+                        "Order " + order.getId() + " was shipped"
                 )
         );
-
-        return orderCreationService.mapToResponse(savedOrder);
     }
 
     @Transactional

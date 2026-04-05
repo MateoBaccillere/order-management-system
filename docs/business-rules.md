@@ -190,3 +190,137 @@ The current MVP does not include:
 - advanced resilience patterns for inter-service communication
 - user ownership model
 - shipment management
+
+
+# Shipping and order lifecycle alignment
+
+## Order status ownership
+
+The `order-service` remains the source of truth for the order lifecycle.  
+However, once `shipping-service` is introduced, the `SHIPPED` status in `order-service` must no longer be triggered manually as a standalone business step disconnected from delivery.
+
+## Updated order lifecycle rule
+
+An order can move through these statuses:
+
+- `CREATED`
+- `CONFIRMED`
+- `CANCELLED`
+- `SHIPPED`
+
+### Official rule
+
+An order must transition to `SHIPPED` only when its related shipment reaches `DELIVERED` in `shipping-service`.
+
+This means:
+
+- confirming an order does not mark it as shipped
+- creating a shipment does not mark it as shipped
+- moving a shipment to `IN_TRANSIT` does not mark it as shipped
+- only `DELIVERED` in `shipping-service` triggers `SHIPPED` in `order-service`
+
+## Shipment lifecycle
+
+The shipment lifecycle is managed by `shipping-service` and uses the following statuses:
+
+- `PENDING`
+- `READY_FOR_DELIVERY`
+- `IN_TRANSIT`
+- `DELIVERED`
+- `FAILED`
+- `CANCELLED`
+
+## Shipment creation rules
+
+A shipment can only be created when:
+
+- the order exists
+- the order is in `CONFIRMED`
+- the order does not already have a shipment assigned
+
+## Shipment transition rules
+
+Shipment transitions are command-based and must not expose a generic free-form status update.
+
+### Allowed transitions
+
+- `PENDING -> READY_FOR_DELIVERY`
+- `READY_FOR_DELIVERY -> IN_TRANSIT`
+- `IN_TRANSIT -> DELIVERED`
+- `IN_TRANSIT -> FAILED`
+- `PENDING -> CANCELLED`
+- `READY_FOR_DELIVERY -> CANCELLED`
+
+### Not allowed
+
+- `DELIVERED` to any other status
+- `FAILED` to any other status
+- `CANCELLED` to any other status
+- direct transitions that skip business steps, such as `PENDING -> DELIVERED`
+
+## Notification rules
+
+Relevant state changes must notify `notification-service`.
+
+### `order-service` notifications
+
+`order-service` must notify on:
+
+- order confirmed
+- order cancelled
+- order shipped
+
+### `shipping-service` notifications
+
+`shipping-service` must notify on:
+
+- shipment created
+- shipment ready for delivery
+- shipment in transit
+- shipment delivered
+- shipment failed
+- shipment cancelled
+
+## Role and status permissions
+
+Status changes are operational actions and are not available to buyers.
+
+### `BUYER`
+
+A buyer can:
+
+- browse active products
+- manage cart
+- perform checkout
+- view own orders
+- view own shipment status
+
+A buyer cannot:
+
+- change product status
+- change order status
+- change shipment status
+
+### `SELLER`
+
+A seller can:
+
+- manage owned products
+- perform valid status transitions for owned orders
+- create and manage shipments related to owned orders/products
+
+A seller cannot:
+
+- operate resources belonging to another seller
+
+### `ADMIN`
+
+An admin can:
+
+- manage all product, order and shipment states
+- perform operational overrides when needed
+
+## Authorization principle
+
+All status transition endpoints are reserved for `SELLER` and `ADMIN`.  
+`BUYER` is restricted to commercial actions and read-only visibility over owned resources.
