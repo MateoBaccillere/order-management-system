@@ -3,15 +3,15 @@ services:
     image: postgres:17
     container_name: order-management-postgres
     environment:
-      POSTGRES_DB: order_db
+      POSTGRES_DB: ecommerce_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: qwerty
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d order_db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_db"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -31,12 +31,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/order_db
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_db
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
       SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATASOURCE_PASSWORD: qwerty
     ports:
       - "8083:8083"
 
@@ -52,16 +49,33 @@ services:
       product-service:
         condition: service_started
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/order_db
+      DB_URL: jdbc:postgresql://postgres:5432/ecommerce_db
       DB_USERNAME: postgres
-      DB_PASSWORD: postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_db
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      DB_PASSWORD: qwerty
       NOTIFICATION_SERVICE_URL: http://notification-service:8081
       PRODUCT_SERVICE_URL: http://product-service:8083
     ports:
       - "8082:8082"
+
+  shipping-service:
+    build:
+      context: ./shipping-service
+    container_name: shipping-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notification-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: qwerty
+      ORDER_SERVICE_URL: http://order-service:8082
+      NOTIFICATION_SERVICE_URL: http://notification-service:8081
+    ports:
+      - "8084:8084"
 
 volumes:
   postgres_data:
