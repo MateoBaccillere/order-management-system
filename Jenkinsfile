@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'feature/compose-jenkins',
+                git branch: 'feature/shipping-service',
                     credentialsId: 'github-pat',
                     url: 'https://github.com/MateoBaccillere/order-management-system'
             }
@@ -38,6 +38,22 @@ pipeline {
             steps {
                 dir('order-service/order-service') {
                     bat 'mvn package -DskipTests'
+                }
+            }
+        }
+
+        stage('Build and Test Shipping Service') {
+            steps {
+                dir('shipping-service') {
+                    bat 'mvnw.cmd clean test'
+                }
+            }
+        }
+
+        stage('Package Shipping Service') {
+            steps {
+                dir('shipping-service') {
+                    bat 'mvnw.cmd package -DskipTests'
                 }
             }
         }
