@@ -1,698 +1,379 @@
 # System Flow
 
-## Overview
+## 1. Overview
 
-This document describes the current functional flow of the system at the end of Week 1.
+This document describes the operational flow of the Order Management System after the completion of Week 2.
 
-The system currently includes:
+The system now includes:
 
-- `order-service` as the core service
-- `product-service` as the source of truth for catalog data
+- `product-service` as the product catalog service
+- `order-service` as the transactional core
+- cart management inside `order-service`
+- `shipping-service` as the shipment lifecycle service
 - `notification-service` as a lightweight support service
-- cart functionality implemented inside `order-service`
 
-The main goal of the current flow is to support:
+The current implemented flow covers:
 
-- direct order creation
-- cart management
-- checkout from cart to order
-- order lifecycle transitions
-- notification of relevant order events
-
----
-
-## Current Services and Roles
-
-### order-service
-Core service responsible for:
-
-- direct order creation
-- cart operations
-- checkout
-- order persistence
-- order lifecycle transitions
-- coordination with external services
-
-### product-service
-Catalog service responsible for:
-
-- product creation
-- product retrieval
-- product listing
-- stock updates
-- activation and deactivation
-- catalog validation source of truth
-
-### notification-service
-Support service responsible for:
-
-- receiving order event notifications
-- storing notifications in memory
-- exposing notifications for inspection
+- product validation through `product-service`
+- cart operations and checkout inside `order-service`
+- order lifecycle handling
+- shipment lifecycle handling
+- synchronous service-to-service HTTP communication
+- notification delivery for relevant order and shipment events
+- infrastructure support through Docker Compose and Jenkins
 
 ---
 
-## High-Level Flow
+## 2. Product Validation Flow
 
-The current system supports two main entry flows:
+### 2.1 Product lookup
+When an order or cart checkout needs product information, `order-service` calls `product-service`.
 
-1. **Direct order flow**
-2. **Cart checkout flow**
+`product-service` acts as the source of truth for:
 
-Both flows rely on `product-service` for product validation.
-
----
-
-# 1. Direct Order Flow
-
-## Goal
-
-Allow a client to create an order directly in `order-service` without using the cart.
-
-## Request Input
-
-The client sends a request to `order-service` with:
-
-- `customerName`
-- one or more items
-- each item contains:
-  - `productId`
-  - `quantity`
-
-## Direct Order Steps
-
-### Step 1 — Client sends order creation request
-The client calls:
-
-`POST /api/orders`
-
-Example payload:
-
-```json
-{
-  "customerName": "Juan Perez",
-  "items": [
-    {
-      "productId": 1,
-      "quantity": 2
-    }
-  ]
-}
-```
-
-## Step 2 — `order-service` validates request structure
-
-`order-service` validates:
-
-- `customerName` is not blank
-- order contains at least one item
-- each item has a valid `productId`
-- each quantity is greater than zero
-
-## Step 3 — `order-service` validates products through `product-service`
-
-For each item, `order-service` calls `product-service` to obtain catalog data.
-
-Validation includes:
-
-- product exists
-- product is active
-- stock is sufficient for requested quantity
-
-At this stage, `product-service` is the source of truth for:
-
+- product existence
 - product name
 - product price
-- product stock
-- product active status
+- active status
+- available stock
 
-## Step 4 — `order-service` builds internal validated snapshots
+### 2.2 Validation result
+For each requested product, `order-service` validates:
 
-After successful validation, `order-service` creates internal validated product snapshots.
+- that the product exists
+- that the product is active
+- that enough stock is available for the requested quantity
 
-These snapshots are used to avoid coupling business flow directly to the remote DTO structure.
+If any validation fails, order creation or checkout is rejected.
 
-## Step 5 — `order-service` creates the order
-
-`order-service` creates:
-
-- `Order`
-- `OrderItem` entries
-
-Each `OrderItem` stores:
+### 2.3 Snapshot creation
+After successful validation, `order-service` builds a snapshot for each purchased item containing:
 
 - `productId`
-- `productName`
-- `unitPrice`
-- `quantity`
-- `subtotal`
+- product name at purchase time
+- product price at purchase time
+- ordered quantity
 
-`productName` and `unitPrice` are stored as historical snapshots.
+This snapshot becomes part of the order and must remain stable even if product data changes later.
 
-### Step 6 — total amount is calculated
-The order total is calculated as the sum of item subtotals.
+---
 
-Formula:
+## 3. Cart Flow
 
-`subtotal = quantity * unitPrice`
+### 3.1 Cart ownership
+At the current stage, cart ownership is temporarily tied to `customerName`.
 
-`totalAmount = sum of all subtotals`
+This is an MVP decision that remains in place until `user-service` is introduced.
 
-## Step 7 — order is persisted
+### 3.2 Cart actions
+The cart inside `order-service` supports:
 
-The order is stored in PostgreSQL with initial status:
+- add item
+- list cart
+- update quantity
+- remove item
+- clear cart
+- checkout
+
+### 3.3 Checkout flow
+The checkout flow is:
+
+1. buyer prepares a cart
+2. `order-service` revalidates products through `product-service`
+3. `order-service` builds order item snapshots
+4. `order-service` calculates totals
+5. `order-service` creates an order with status `CREATED`
+6. `order-service` persists the order
+7. `order-service` clears the cart
+
+### 3.4 Checkout result
+A successful checkout does not confirm or ship the order.  
+It only creates the order in `CREATED`.
+
+---
+
+## 4. Order Lifecycle Flow
+
+### 4.1 Official order statuses
+The order lifecycle uses:
 
 - `CREATED`
+- `CONFIRMED`
+- `CANCELLED`
+- `SHIPPED`
 
-## Step 8 — order lifecycle continues later
+### 4.2 Created order
+When an order is first created, it starts in `CREATED`.
 
-After creation, the order can continue through its normal lifecycle:
+At this point:
 
-- confirm
-- cancel
-- ship
+- the order exists
+- item snapshots are already stored
+- total amount is already calculated
+- no shipment exists yet
 
-# 2. Cart Flow
-
-## Goal
-
-Allow a client to build a temporary cart and convert it into an order through checkout.
-
-## Current Cart Design
-
-At the current stage:
-
-- cart is implemented inside `order-service`
-- no separate cart microservice exists
-- cart is associated with `customerName`
-- cart is ephemeral
-- cart does not keep historical states
-
-## 2.1 Get or Create Cart
-
-### Client action
-
-The client requests the current cart:
-
-`GET /api/cart/{customerName}`
-
-### System behavior
-
-If the customer already has a cart:
-
-- return it
-
-If the customer has no cart:
-
-- create one on demand
-- persist it
-- return the new empty cart
-
-## 2.2 Add Item to Cart
-
-### Client action
-
-The client calls:
-
-`POST /api/cart/{customerName}/items`
-
-Example payload:
-
-```json
-{
-  "productId": 1,
-  "quantity": 2
-}
-```
-
-### System behavior
-
-`order-service`:
-
-- retrieves or creates the cart
-- validates item quantity
-- validates product through catalog flow when required
-- adds item to cart
-- persists updated cart
-
-### Result
-
-The cart now contains the requested item.
-
-## 2.3 Update Cart Item Quantity
-
-### Client action
-
-The client calls:
-
-`PATCH /api/cart/{customerName}/items/{productId}`
-
-### Example payload:
-```json
-{
-  "quantity": 3
-}
-```
-### System behavior
-
-`order-service`:
-
-- retrieves the cart
-- locates the item by `productId`
-- validates the new quantity
-- updates the item
-- persists the cart
-
-## 2.4 Remove Cart Item
-
-### Client action
-
-The client calls:
-
-`DELETE /api/cart/{customerName}/items/{productId}`
-
-### System behavior
-
-`order-service`:
-
-- retrieves the cart
-- removes the selected item
-- persists the updated cart
-
-## 2.5 Clear Cart
-
-### Client action
-
-The client calls:
-
-`DELETE /api/cart/{customerName}`
-
-### System behavior
-
-`order-service`:
-
-- retrieves the cart
-- removes all items
-- persists the empty cart
-
-# 3. Checkout Flow
-
-## Goal
-
-Convert the current cart into an order.
-
-## Checkout Request
-
-The client calls:
-
-`POST /api/cart/{customerName}/checkout`
-
-## Checkout Steps
-
-### Step 1 — `order-service` retrieves the cart
-
-`order-service` loads the cart associated with `customerName`.
-
-### Step 2 — `order-service` validates cart content
-
-Validation includes:
-
-- cart exists
-- cart contains items
-- all quantities are valid
-
-### Step 3 — `order-service` revalidates every product through `product-service`
-
-Before creating the order, all cart items are revalidated against `product-service`.
-
-Validation includes:
-
-- product still exists
-- product is still active
-- stock is still sufficient
-
-This revalidation is required because catalog data may have changed after the item was added to the cart.
-
-### Step 4 — `order-service` creates the order from validated data
-
-`order-service` reuses the same order creation logic used for direct order creation.
-
-This means checkout also produces:
-
-- an `Order`
-- `OrderItem` entries with product snapshots
-- calculated `totalAmount`
-- initial status `CREATED`
-
-### Step 5 — order is persisted
-
-The new order is stored in PostgreSQL.
-
-### Step 6 — cart is cleared
-
-After successful checkout:
-
-- the cart is emptied
-- the cart does not preserve historical checkout states
-
-### Step 7 — normal order lifecycle continues
-
-The newly created order can later be:
-
-- confirmed
-- cancelled
-- shipped
-
-# 4. Order Lifecycle Flow
-
-## Goal
-
-Allow the created order to progress through business states.
-
-## Initial Status
-
-Every new order starts as:
-
-- `CREATED`
-
-## Allowed Transitions
-
-### From `CREATED`
-
-Allowed:
+### 4.3 From `CREATED`
+Allowed transitions:
 
 - `CONFIRMED`
 - `CANCELLED`
 
 Not allowed:
 
+- direct `SHIPPED`
+
+### 4.4 From `CONFIRMED`
+Allowed transitions:
+
+- `CANCELLED`
+- shipment creation in `shipping-service`
+
+Not directly allowed as a standalone business step:
+
+- manual shipping completion disconnected from shipment delivery
+
+### 4.5 Meaning of `SHIPPED`
+`SHIPPED` is not treated as an isolated manual order transition anymore.
+
+It is now the business result of successful shipment delivery.
+
+### 4.6 Shipping completion rule
+An order becomes `SHIPPED` only when the related shipment reaches `DELIVERED` in `shipping-service`.
+
+### 4.7 Terminal order states
+These are terminal order states:
+
+- `CANCELLED`
 - `SHIPPED`
 
-### From `CONFIRMED`
+No further order lifecycle transitions are allowed after that.
 
-Allowed:
+---
 
-- `SHIPPED`
+## 5. Shipping Flow
+
+### 5.1 Shipping introduction
+Week 2 introduces `shipping-service` as a standalone service responsible for shipment lifecycle management.
+
+It does not replace `order-service`, but extends the system after order confirmation.
+
+### 5.2 Shipment creation prerequisites
+A shipment can be created only if:
+
+- the related order exists
+- the related order is in `CONFIRMED`
+- the order does not already have a shipment
+
+### 5.3 Official shipment statuses
+The shipment lifecycle uses:
+
+- `PENDING`
+- `READY_FOR_DELIVERY`
+- `IN_TRANSIT`
+- `DELIVERED`
+- `FAILED`
 - `CANCELLED`
 
-### From `CANCELLED`
+### 5.4 Shipment lifecycle flow
+The expected shipment lifecycle is:
 
-No further transitions allowed.
-
-### From `SHIPPED`
-
-No further transitions allowed.
-
-## 4.1 Confirm Order
-
-### Client action
-
-The client calls:
-
-`PATCH /api/orders/{id}/confirm`
-
-### System behavior
-
-`order-service`:
-
-- loads the order
-- validates transition from `CREATED` to `CONFIRMED`
-- updates status
-- persists changes
-- sends notification
-
-## 4.2 Cancel Order
-
-### Client action
-
-The client calls:
-
-`PATCH /api/orders/{id}/cancel`
-
-### System behavior
-
-`order-service`:
-
-- loads the order
-- validates allowed cancellation transition
-- updates status to `CANCELLED`
-- persists changes
-- sends notification
-
-## 4.3 Ship Order
-
-### Client action
-
-The client calls:
-
-`PATCH /api/orders/{id}/ship`
-
-### System behavior
-
-`order-service`:
-
-- loads the order
-- validates transition from `CONFIRMED` to `SHIPPED`
-- updates status
-- persists changes
-- sends notification
-
-# Shipping flow
-
-## Current MVP flow after Week 1
-
-The system already supports:
-
-- product management in `product-service`
-- cart operations inside `order-service`
-- checkout creating an order in `CREATED`
-- order lifecycle managed by `order-service`
-- notifications through `notification-service`
-
-## Week 2 flow extension with `shipping-service`
-
-The next functional flow is defined as follows:
-
-1. buyer selects products and manages cart
-2. buyer performs checkout
-3. `order-service` creates the order with status `CREATED`
-4. seller or admin confirms the order
-5. `order-service` changes order status to `CONFIRMED`
-6. `shipping-service` may create a shipment only for a `CONFIRMED` order
-7. shipment starts in `PENDING`
-8. seller or admin advances shipment through:
-   - `READY_FOR_DELIVERY`
-   - `IN_TRANSIT`
+1. shipment is created in `PENDING`
+2. shipment moves to `READY_FOR_DELIVERY`
+3. shipment moves to `IN_TRANSIT`
+4. shipment ends in one of:
    - `DELIVERED`
-9. when shipment reaches `DELIVERED`, `shipping-service` calls `order-service`
-10. `order-service` changes the related order status to `SHIPPED`
-11. both services notify `notification-service` for their respective domain events
+   - `FAILED`
 
-## Important lifecycle rule
+Shipment may also be cancelled before transit:
 
-The order status `SHIPPED` is no longer treated as an isolated manual step in `order-service`.  
-It is now a derived business result triggered by shipment delivery confirmation.
+- `PENDING -> CANCELLED`
+- `READY_FOR_DELIVERY -> CANCELLED`
 
-## Failure and cancellation handling
+### 5.5 Shipment transition API style
+Shipment transitions are command-based and exposed through explicit `PATCH` endpoints.
 
-If a shipment reaches `FAILED`, the order is not automatically cancelled.  
-Shipment failure and order cancellation are treated as different business concepts.
-
-If shipment is cancelled before delivery, the shipment lifecycle ends in `CANCELLED`, while order handling remains subject to explicit business action in `order-service`.
-
-## API transition style
-
-Shipment transitions are command-based through explicit `PATCH` endpoints.  
-The API does not expose a generic `"set shipment status"` operation.
-
-### Examples
+Examples:
 
 - `PATCH /api/shipments/{id}/ready`
 - `PATCH /api/shipments/{id}/in-transit`
 - `PATCH /api/shipments/{id}/deliver`
 - `PATCH /api/shipments/{id}/fail`
 - `PATCH /api/shipments/{id}/cancel`
-# 5. Notification Flow
 
-## Goal
+The API does not expose a generic free-form status setter.
 
-Track important order events through a simple support service.
+### 5.6 Delivery-driven order completion
+When a shipment reaches `DELIVERED`:
 
-## Triggered Events
+1. `shipping-service` persists the shipment as `DELIVERED`
+2. `shipping-service` notifies `notification-service`
+3. `shipping-service` calls `order-service`
+4. `order-service` transitions the related order to `SHIPPED`
+5. `order-service` notifies `notification-service`
 
-At the current stage, notifications are sent when an order is:
+### 5.7 Failed shipment behavior
+If a shipment reaches `FAILED`, the order is not automatically cancelled.
 
-- confirmed
-- cancelled
-- shipped
+Shipment failure and order cancellation are treated as different business concepts.
 
-## Flow
+### 5.8 One shipment per order
+At the current stage, one order has at most one shipment.
 
-### Step 1 — `order-service` changes order status
+Split shipments and partial deliveries are out of scope.
 
-A lifecycle action succeeds in `order-service`.
+---
 
-### Step 2 — `order-service` builds notification payload
+## 6. Notification Flow
 
-The payload includes information such as:
+### 6.1 Notification ownership
+Each service is responsible for notifying its own domain events.
 
-- `orderId`
-- `eventType`
-- `message`
+### 6.2 Order-service notifications
+`order-service` sends notifications for relevant order lifecycle events, including:
 
-### Step 3 — `order-service` calls `notification-service`
+- `ORDER_CONFIRMED`
+- `ORDER_CANCELLED`
+- `ORDER_SHIPPED`
 
-`order-service` sends an HTTP request to `notification-service`.
+### 6.3 Shipping-service notifications
+`shipping-service` sends notifications for relevant shipment lifecycle events, including:
 
-### Step 4 — `notification-service` stores notification
+- `SHIPMENT_CREATED`
+- `SHIPMENT_READY_FOR_DELIVERY`
+- `SHIPMENT_IN_TRANSIT`
+- `SHIPMENT_DELIVERED`
+- `SHIPMENT_FAILED`
+- `SHIPMENT_CANCELLED`
 
-`notification-service` stores the notification in memory.
+### 6.4 Notification-service role
+`notification-service` is a lightweight support service.
 
-### Step 5 — notifications can be inspected
+It receives notification requests and processes them, but it does not own business rules from other services.
 
-The client can query notifications through:
+---
 
-`GET /api/notifications`
+## 7. Error Flow
 
-# 6. Error Flow
+### 7.1 Product validation errors
+If a product does not exist, is inactive or has insufficient stock, order creation or checkout is rejected in `order-service`.
 
-## Goal
+### 7.2 Order validation errors for shipping
+If `shipping-service` tries to create a shipment for:
 
-Return meaningful errors when business rules fail.
+- a non-existing order
+- an order not in `CONFIRMED`
+- an order that already has a shipment
 
-## Common Error Scenarios
+the shipment creation request is rejected.
 
-### Product-related errors
+### 7.3 Shipment transition errors
+If a shipment transition violates lifecycle rules, `shipping-service` rejects the request.
 
-- product does not exist
-- product is inactive
-- stock is insufficient
+Examples:
 
-### Order-related errors
+- trying to deliver from `PENDING`
+- trying to cancel from `DELIVERED`
+- trying to move from `FAILED` to another state
 
-- order does not exist
-- order has no items
-- invalid status transition
-- invalid request payload
+### 7.4 Cross-service integration errors
+The current architecture uses synchronous HTTP calls.
 
-### Cart-related errors
+Because of this, cross-service failures can produce partial completion scenarios.
 
-- cart item not found
-- invalid quantity
-- checkout attempted on empty cart
+Example:
 
-## Error Handling Approach
+- `shipping-service` persists `DELIVERED`
+- notification is sent
+- the call to `order-service` fails
+- the shipment is `DELIVERED` but the order remains `CONFIRMED`
 
-The system uses:
+This limitation is currently accepted as part of the MVP simplicity strategy.
 
-- custom exceptions
-- centralized exception handling
-- consistent HTTP error responses
+---
 
-# 7. Persistence Flow
+## 8. Persistence Flow
 
-## PostgreSQL Persistence
+### 8.1 Product persistence
+`product-service` persists catalog data and remains the source of truth for current product state.
 
+### 8.2 Order persistence
 `order-service` persists:
 
 - orders
 - order items
-- carts
+- cart
 - cart items
 
-`product-service` persists:
+It also stores product purchase snapshots inside the order domain.
 
-- products
+### 8.3 Shipment persistence
+`shipping-service` persists:
 
-`notification-service` persists:
+- shipments
+- shipment status
+- shipment timestamps
 
-- notifications are not stored in database yet
-- current storage is in memory only
+### 8.4 Infrastructure note
+At the current stage, all services use the same PostgreSQL instance at infrastructure level.
 
-# 8. Internal Coordination Inside `order-service`
+This does not change the domain ownership responsibilities of each service.
 
-To keep responsibilities clearer, `order-service` currently uses internal separation of concerns:
+---
 
-## `CatalogProductValidationService`
+## 9. Internal Coordination Inside order-service
 
-Centralizes product validation against `product-service`.
+### 9.1 Order creation coordination
+Inside `order-service`, order creation is coordinated through dedicated services that separate:
 
-Used by:
+- catalog validation
+- product snapshot creation
+- order creation
+- order lifecycle handling
 
-- direct order creation
-- cart-related validation
-- checkout
+### 9.2 Cart coordination
+Cart operations remain inside `order-service` and are coordinated without introducing a dedicated cart microservice.
 
-## `OrderCreationService`
+### 9.3 Order shipping coordination
+`order-service` is still the source of truth for order status, but its `SHIPPED` transition is now driven by shipment delivery completion coming from `shipping-service`.
 
-Centralizes order construction and persistence from validated product snapshots.
+---
 
-Used by:
+## 10. End-to-End Flow Summary
 
-- direct order creation
-- checkout
+### 10.1 Happy path
+The main implemented end-to-end flow is:
 
-## `OrderService`
+1. seller creates and activates products
+2. buyer browses active products
+3. buyer adds products to cart
+4. buyer performs checkout
+5. `order-service` creates order in `CREATED`
+6. seller or admin confirms the order
+7. `shipping-service` creates shipment for the confirmed order
+8. shipment moves from `PENDING` to `READY_FOR_DELIVERY`
+9. shipment moves to `IN_TRANSIT`
+10. shipment reaches `DELIVERED`
+11. `shipping-service` calls `order-service`
+12. `order-service` marks the order as `SHIPPED`
+13. both services emit their own notifications
 
-Coordinates:
+### 10.2 Important rule summary
+The system does not treat order shipping as a direct manual completion step anymore.  
+Order shipping completion is now derived from shipment delivery completion.
 
-- direct order use cases
-- order retrieval
-- order lifecycle transitions
+---
 
-## `CartService`
+## 11. Current Week 2 Baseline
 
-Coordinates:
+At the end of Week 2, the implemented baseline is:
 
-- get cart
-- add item
-- update quantity
-- remove item
-- clear cart
-- checkout
-
-# 9. End-to-End Flow Summary
-
-## Flow A — Direct order
-
-- Create product in `product-service`
-- Send order creation request to `order-service`
-- Validate product through `product-service`
-- Persist order in `CREATED`
-- Continue order lifecycle
-
-## Flow B — Cart checkout
-
-- Create product in `product-service`
-- Add item to cart in `order-service`
-- Update or remove items if needed
-- Checkout cart
-- Revalidate products through `product-service`
-- Persist order in `CREATED`
-- Clear cart
-- Continue order lifecycle
-
-## Flow C — Notification after lifecycle action
-
-- Confirm, cancel, or ship an order
-- `order-service` updates order status
-- `order-service` sends notification
-- `notification-service` stores notification in memory
-
-# 10. Current Week 1 Baseline
-
-At the end of Week 1, the integrated baseline of the project is:
-
-- `order-service` implemented and acting as the core
-- `product-service` implemented and integrated
-- cart implemented inside `order-service`
-- checkout creating orders in `CREATED`
-- `notification-service` connected for order events
-- PostgreSQL persistence working
-- Docker Compose working for local integrated execution
-- Jenkins pipeline validating the current core services
-
-This is the functional baseline that prepares the project for the next planned growth step:
-
-- `shipping-service` in Week 2
-
+- `product-service` exists and is integrated with `order-service`
+- `order-service` already manages order creation, validation, totals and lifecycle
+- cart is implemented inside `order-service`
+- `shipping-service` exists and manages shipment lifecycle
+- shipment creation is restricted to confirmed orders
+- shipment transitions use explicit command-style `PATCH` endpoints
+- shipment delivery triggers order shipping completion
+- `notification-service` receives both order and shipment events
+- Docker Compose includes the integrated services
+- Jenkins validates the main services through build, test and package stages
