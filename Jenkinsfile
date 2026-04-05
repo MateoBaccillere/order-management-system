@@ -45,7 +45,7 @@ pipeline {
         stage('Build and Test Shipping Service') {
             steps {
                 dir('shipping-service') {
-                    bat 'mvnw.cmd clean test'
+                    bat 'mvn clean test'
                 }
             }
         }
@@ -53,7 +53,7 @@ pipeline {
         stage('Package Shipping Service') {
             steps {
                 dir('shipping-service') {
-                    bat 'mvnw.cmd package -DskipTests'
+                    bat 'mvn package -DskipTests'
                 }
             }
         }
