@@ -1,359 +1,416 @@
 # Architecture
 
-## Overview
+## 1. Overview
 
-The system is currently composed of three backend services:
+The Order Management System is a backend microservices-based MVP designed to evolve incrementally from a portfolio-ready foundation into a more robust distributed system.
 
-- `order-service`
-- `product-service`
-- `notification-service`
+At the current stage, after the completion of Week 2, the system includes:
 
-The architecture keeps `order-service` as the core business service while introducing `product-service` as the source of truth for catalog data and keeping `notification-service` as a lightweight support service.
+- `product-service` for catalog management
+- `order-service` as the core transactional service
+- `shipping-service` for shipment lifecycle handling
+- `notification-service` as a lightweight supporting service
 
-The goal at this stage is to preserve a realistic microservice direction without overengineering the MVP.
+The architecture intentionally favors:
 
-## Current Architectural Stage
+- simplicity over premature distribution complexity
+- clear bounded responsibilities
+- synchronous service-to-service communication
+- incremental weekly growth
+- maintainability and demonstration value for portfolio purposes
 
-The project is no longer in initial design stage.
+The system is no longer in initial design phase.  
+It is in active implementation over an already functional architecture.
 
-Current state:
+---
 
-- `order-service` is already implemented as the core of the system
-- `product-service` is already implemented and integrated
-- `notification-service` already exists as a lightweight support service
-- cart functionality was implemented inside `order-service`
-- Docker Compose and Jenkins already support the current MVP baseline
+## 2. Current Service Responsibilities
 
-This means the project is in active execution over an existing functional architecture, not in architecture discovery.
+### 2.1 Product Service
+`product-service` is responsible for:
 
-## Services
+- product creation and updates
+- active/inactive state
+- stock availability
+- current product pricing
+- catalog validation source for orders and cart checkout
 
-### 1. order-service
+It acts as the source of truth for current product state.
 
-The `order-service` is the core service of the system.
+### 2.2 Order Service
+`order-service` is the core service of the system.
 
-Responsibilities:
+It is responsible for:
 
-- create orders
-- retrieve orders
-- manage order status transitions
-- validate business rules
-- calculate order totals
-- persist orders and items in PostgreSQL
-- manage cart operations
-- validate products through `product-service`
-- create orders from validated product snapshots
-- notify `notification-service` when relevant order events happen
-
-It remains the central service because it owns the order lifecycle and coordinates the main purchase flow.
-
-### 2. product-service
-
-The `product-service` is a standalone catalog service.
-
-Responsibilities:
-
-- create products
-- retrieve products by id
-- list products
-- update stock
-- activate products
-- deactivate products
-- enforce product business rules
-- act as the source of truth for:
-  - product name
-  - product price
-  - product stock
-  - product active status
-
-This service was introduced so product validation and catalog rules do not stay mixed inside `order-service`.
-
-### 3. notification-service
-
-The `notification-service` is a lightweight supporting service.
-
-Responsibilities:
-
-- receive notifications from `order-service`
-- store notifications in memory
-- expose stored notifications through an API
-
-At this stage, it remains intentionally simple.
-
-## Communication
-
-The services communicate synchronously through HTTP.
-
-### Current service interactions
-
-- `order-service` calls `product-service` to validate products before:
-  - direct order creation
-  - cart operations when needed
-  - checkout
-- `order-service` calls `notification-service` when relevant order events occur
-
-This synchronous approach is intentionally simple and appropriate for the MVP stage.
-
-## Current Functional Flow
-
-### Direct order flow
-
-1. A client sends an order creation request to `order-service`
-2. The request includes `customerName`, `productId`, and `quantity`
-3. `order-service` queries `product-service`
-4. `product-service` returns catalog data
-5. `order-service` validates:
-   - product existence
-   - product active status
-   - stock availability
-6. `order-service` stores the order and order items
-7. The order is created in `CREATED`
-8. `order-service` can later notify `notification-service` on relevant order events
-
-### Cart checkout flow
-
-1. A client interacts with cart endpoints in `order-service`
-2. The cart is associated with `customerName`
-3. Cart items store `productId` and `quantity`
-4. On checkout, `order-service` revalidates all products against `product-service`
-5. `order-service` creates an order in `CREATED`
-6. The cart is cleared after successful checkout
-7. The new order continues the normal order lifecycle
-
-## Architectural Style
-
-Each service follows a simple layered architecture.
-
-This keeps the codebase understandable, testable, and appropriate for incremental weekly delivery.
-
-## Layered Design
-
-### order-service layers
-
-- `controller`  
-  Handles HTTP requests and responses
-
-- `dto`  
-  Contains request and response payloads
-
-- `entity`  
-  Contains JPA entities and domain enums
-
-- `repository`  
-  Handles persistence operations
-
-- `service`  
-  Contains business logic and use cases
-
-- `exception`  
-  Contains custom exceptions and global exception handling
-
-- `client`  
-  Contains HTTP clients used to communicate with external services
-
-- `config`  
-  Contains application configuration classes
-
-### Important internal application services in order-service
-
-At the current stage, `order-service` was internally refactored to separate responsibilities more clearly:
-
-- `CatalogProductValidationService`  
-  Centralizes validation against `product-service`
-
-- `OrderCreationService`  
-  Centralizes order construction and persistence from validated product data
-
-- `OrderService`  
-  Coordinates direct order use cases and order lifecycle transitions
-
-- `CartService`  
-  Handles cart retrieval, mutation, and checkout flow
-
-This is an internal modularization improvement without breaking the current service boundary.
-
-### product-service layers
-
-- `controller`
-- `dto`
-- `entity`
-- `repository`
-- `service`
-- `exception`
-
-### notification-service layers
-
-- `controller`
-- `dto`
-- `service`
-- `config`
-
-## Data Model
-
-### Order
-
-Main fields:
-
-- `id`
-- `customerName`
-- `status`
-- `totalAmount`
-- `createdAt`
-- `updatedAt`
-
-### OrderItem
-
-Main fields:
-
-- `id`
-- `productId`
-- `productName`
-- `quantity`
-- `unitPrice`
-- `subtotal`
-- `order`
-
-`productName` and `unitPrice` are stored as snapshots to preserve historical purchase data even if the catalog changes later.
-
-### Cart
-
-Main fields:
-
-- `id`
-- `customerName`
-- `items`
-
-### CartItem
-
-Main fields:
-
-- `id`
-- `productId`
-- `quantity`
-- `cart`
-
-### Product
-
-Main fields:
-
-- `id`
-- `name`
-- `price`
-- `stock`
-- `active`
-
-## Status Model
-
-### Order statuses
-
-- `CREATED`
-- `CONFIRMED`
-- `CANCELLED`
-- `SHIPPED`
-
-### Status transition rules
-
-Allowed transitions:
-
-- `CREATED -> CONFIRMED`
-- `CREATED -> CANCELLED`
-- `CONFIRMED -> SHIPPED`
-- `CONFIRMED -> CANCELLED`
-
-Terminal states:
-
-- `CANCELLED`
-- `SHIPPED`
-
-## Persistence
-
-### order-service
-Uses PostgreSQL for persistence of:
-
-- orders
-- order items
-- carts
-- cart items
-
-### product-service
-Uses PostgreSQL for persistence of:
-
-- products
-
-### notification-service
-Stores data in memory for now.
-
-This decision keeps the support service lightweight while persistence effort is focused on the core business flows.
-
-## Containerization
-
-The system includes a Docker Compose setup that starts:
-
-- PostgreSQL
-- `product-service`
-- `order-service`
-- `notification-service`
-
-This allows local execution of the real Week 1 integrated baseline with a single command.
-
-## Continuous Integration
-
-A Jenkins pipeline is included to automate:
-
+- cart management
 - checkout
-- build
-- test
-- package
+- order creation
+- order persistence
+- order item snapshot persistence
+- order lifecycle transitions
+- total calculation
+- integration with `product-service`
+- integration with `notification-service`
 
-At the current stage, the pipeline validates:
+It remains the source of truth for the order domain.
+
+### 2.3 Shipping Service
+`shipping-service` is introduced in Week 2 as a standalone microservice.
+
+It is responsible for:
+
+- shipment creation
+- shipment persistence
+- shipment lifecycle transitions
+- validating shipment creation against order status
+- notifying shipment-related events
+- informing `order-service` when shipment delivery is completed
+
+It is the source of truth for the shipment domain.
+
+### 2.4 Notification Service
+`notification-service` remains intentionally lightweight.
+
+It is responsible for:
+
+- receiving notification requests from other services
+- processing notification messages
+
+It does not own order, product or shipment business rules.
+
+---
+
+## 3. Architectural Principles
+
+### 3.1 Incremental growth
+The project evolves one service at a time.
+
+Each weekly increment must:
+
+- introduce one meaningful domain capability
+- integrate quickly with the existing baseline
+- avoid long isolated redesign phases
+- close with a testable and demonstrable result
+
+### 3.2 Core-first design
+`order-service` is the center of the current system and all new capabilities grow from that base.
+
+`shipping-service` was introduced as an extension of the existing order flow, not as a replacement of the order core.
+
+### 3.3 Avoid premature overengineering
+The architecture explicitly avoids introducing advanced distributed patterns too early.
+
+The current MVP does not introduce:
+
+- Kafka
+- event brokers
+- workflow engines
+- Kubernetes
+- advanced deployment automation
+- split shipment orchestration
+- OAuth
+- premature caching layers
+
+### 3.4 Implementation-aware architecture
+Documentation and infrastructure must reflect the actual implemented system, not an imagined future state.
+
+This rule is especially important because the project evolves weekly and architectural truth must remain synchronized with code, Docker and CI.
+
+---
+
+## 4. Domain Boundaries
+
+### 4.1 Product domain boundary
+The product domain belongs to `product-service`.
+
+Other services may consume product data but do not own:
+
+- stock truth
+- active state truth
+- current product price truth
+
+### 4.2 Order domain boundary
+The order domain belongs to `order-service`.
+
+Other services may read or influence order state through controlled integration, but order lifecycle ownership remains in `order-service`.
+
+### 4.3 Shipment domain boundary
+The shipment domain belongs to `shipping-service`.
+
+Other services do not own shipment lifecycle transitions.
+
+### 4.4 Notification domain boundary
+Notifications are delegated to `notification-service`, but notification meaning remains owned by the service that emits the event.
+
+For example:
+
+- `ORDER_SHIPPED` belongs conceptually to `order-service`
+- `SHIPMENT_DELIVERED` belongs conceptually to `shipping-service`
+
+---
+
+## 5. Service Interaction Model
+
+### 5.1 Current integration style
+The system uses synchronous HTTP communication between services.
+
+This is an intentional MVP choice.
+
+### 5.2 Current main interactions
+
+#### Product validation
+`order-service -> product-service`
+
+`order-service` validates products during:
+
+- direct order creation
+- cart checkout
+
+#### Order notifications
+`order-service -> notification-service`
+
+`order-service` notifies order lifecycle events.
+
+#### Shipment notifications
+`shipping-service -> notification-service`
+
+`shipping-service` notifies shipment lifecycle events.
+
+#### Shipment creation validation
+`shipping-service -> order-service`
+
+`shipping-service` validates that a shipment can only be created for an order in `CONFIRMED`.
+
+#### Delivery-driven shipping completion
+`shipping-service -> order-service`
+
+When a shipment reaches `DELIVERED`, `shipping-service` calls `order-service` to mark the related order as `SHIPPED`.
+
+### 5.3 Why synchronous HTTP was chosen
+This model was kept because it:
+
+- matches current MVP constraints
+- reduces infrastructure complexity
+- is easy to debug
+- is easy to demonstrate
+- aligns with the existing Docker Compose setup
+- avoids premature distributed-system overhead
+
+### 5.4 Known limitation
+Synchronous integration introduces runtime coupling and the possibility of partial completion scenarios.
+
+Example:
+
+- `shipping-service` persists `DELIVERED`
+- notification is sent
+- call to `order-service` fails
+- shipment stays `DELIVERED`
+- order remains `CONFIRMED`
+
+This limitation is currently accepted as part of the MVP simplicity strategy.
+
+---
+
+## 6. Order and Shipment Architecture Alignment
+
+### 6.1 Historical context
+Before `shipping-service`, order lifecycle simplification allowed `SHIPPED` to be treated as a direct order-side lifecycle action.
+
+That behavior is no longer the architectural baseline.
+
+### 6.2 Current rule
+With the introduction of `shipping-service`, order and shipment lifecycles are separated.
+
+The official rule is:
+
+- `shipping-service` owns shipment lifecycle
+- `order-service` owns order lifecycle
+- order transition to `SHIPPED` happens only after shipment reaches `DELIVERED`
+
+### 6.3 Why this rule was chosen
+This model was chosen because it:
+
+- keeps bounded contexts clearer
+- improves semantic correctness
+- gives `shipping-service` real architectural purpose
+- produces a stronger portfolio design than keeping shipping logic fully inside `order-service`
+
+### 6.4 Tradeoff
+This design is better semantically, but it introduces tighter runtime dependency between shipment completion and order lifecycle completion.
+
+At Week 2, this tradeoff is acceptable.
+
+---
+
+## 7. Cart Architecture Decision
+
+### 7.1 Current placement
+Cart remains inside `order-service`.
+
+### 7.2 Why this decision was kept
+A separate cart microservice was intentionally rejected at this stage because it would:
+
+- add a new service too early
+- increase infrastructure and coordination complexity
+- provide little extra value for the current MVP scope
+
+### 7.3 Architectural judgment
+Keeping cart inside `order-service` is the correct decision for the current project stage.
+
+It preserves focus on visible business value while keeping the architecture understandable and realistic.
+
+---
+
+## 8. Role and Ownership Direction
+
+### 8.1 Business-level role model
+The architecture already assumes these actors:
+
+- `BUYER`
+- `SELLER`
+- `ADMIN`
+
+### 8.2 Week 2 status
+Formal enforcement is not fully implemented yet, but the architecture already treats role ownership as part of the domain design.
+
+### 8.3 Operational ownership rule
+Lifecycle transitions are treated as operational actions.
+
+Therefore:
+
+- `BUYER` does not manage product, order or shipment states
+- `SELLER` manages owned operational resources
+- `ADMIN` may operate globally
+
+This ownership model becomes implementation focus in Week 3 through `user-service`.
+
+---
+
+## 9. Persistence Strategy
+
+### 9.1 Current database strategy
+The current infrastructure uses a single shared PostgreSQL instance.
+
+This is an intentional MVP infrastructure decision.
+
+### 9.2 Why this strategy was kept
+A shared instance was kept because it:
+
+- reduces setup complexity
+- keeps Docker Compose simple
+- accelerates local integration testing
+- is sufficient for the current project scale
+
+### 9.3 Architectural note
+Even though services share one database instance at infrastructure level, domain ownership is still separated logically by service responsibility.
+
+The current setup should not be interpreted as a final production-grade persistence strategy.
+
+---
+
+## 10. Docker Architecture
+
+### 10.1 Current Compose baseline
+Docker Compose now includes:
+
+- `postgres`
+- `notification-service`
+- `product-service`
+- `order-service`
+- `shipping-service`
+
+### 10.2 Networking model
+Inside Docker Compose, services communicate using Docker service names.
+
+Examples:
 
 - `product-service`
 - `order-service`
+- `notification-service`
+- `postgres`
 
-This keeps CI aligned with the real functional scope of Week 1.
+`localhost` is reserved for local non-containerized execution only.
 
-## Design Decisions
+### 10.3 Why Docker matters in this architecture
+Docker Compose acts as the executable representation of the current architecture.
 
-### Why keep order-service as the core?
-Because the main domain of the project is still the order lifecycle. Even after adding catalog validation and cart functionality, the central business orchestration remains in `order-service`.
+It is not just a deployment convenience; it is the practical validation layer for the current integrated system design.
 
-### Why create product-service?
-Because product rules, stock checks, and active/inactive logic belong to catalog management and should not remain duplicated or hardcoded inside order logic.
+---
 
-### Why keep cart inside order-service?
-Because introducing a separate cart microservice in Week 1 would add unnecessary complexity too early. At this stage, cart is part of the purchase flow and can live inside the core service.
+## 11. CI Architecture
 
-### Why keep synchronous HTTP instead of messaging?
-Because it is simpler to implement, debug, and validate for an MVP that is still focused on clear business flow execution.
+### 11.1 Jenkins scope
+Jenkins currently validates the main services through build, test and package stages.
 
-### Why store product snapshots in OrderItem?
-Because an order must preserve the historical context of what was purchased, even if the product catalog later changes.
+At the end of Week 2, the pipeline includes:
 
-### Why keep notification-service simple?
-Because notifications are currently a support capability, not the central business domain.
+- `product-service`
+- `order-service`
+- `shipping-service`
 
-## Tradeoffs
+### 11.2 Why this scope is appropriate
+This pipeline scope is enough for the current stage because it validates:
 
-Current tradeoffs accepted for the MVP:
+- compilation
+- tests
+- packaging readiness
 
-- cart is associated with `customerName` because `user-service` does not exist yet
-- synchronous communication means tighter runtime coupling between services
-- notification persistence is still in memory
-- a single PostgreSQL setup is used for practical MVP execution
-- resilience patterns such as retries or circuit breakers are not yet implemented
+without introducing unnecessary CI complexity.
 
-These are acceptable at the current stage and should not be overengineered early.
+### 11.3 What CI intentionally does not include yet
+The current pipeline does not include:
 
-## Future Architecture Improvements
+- deployment stages
+- Docker image publishing
+- integrated Compose-based end-to-end execution
+- advanced test orchestration
+- parallel stage optimization
 
-Planned or possible future improvements include:
+This is intentional and aligned with MVP priorities.
 
-- add `shipping-service` in Week 2
-- add `user-service` in Week 3
-- introduce simple authentication in Week 4
-- persist notifications in a database
-- improve integration testing
-- add OpenAPI documentation
-- add database migrations
-- improve resilience for service-to-service calls
-- add observability and structured logging
+---
+
+## 12. Rejected Alternatives
+
+### 12.1 Event-driven shipping completion
+Rejected for Week 2 because it would require broker infrastructure, retry handling and additional operational complexity too early.
+
+### 12.2 Polling between services
+Rejected because polling would add unnecessary background coordination logic and worse traceability for the current MVP.
+
+### 12.3 Separate cart microservice
+Rejected because the cart domain does not justify its own service yet.
+
+### 12.4 Shipping logic fully inside order-service
+Rejected because it weakens domain separation and makes the shipping increment less meaningful architecturally.
+
+---
+
+## 13. Current Week 2 Baseline
+
+At the end of Week 2, the architecture baseline is:
+
+- `order-service` is already implemented and remains the core service
+- `product-service` is integrated and acts as product truth
+- cart remains inside `order-service`
+- `shipping-service` is implemented as a standalone service
+- shipment lifecycle is separated from order lifecycle
+- order shipping completion is driven by shipment delivery
+- `notification-service` remains lightweight
+- Docker Compose represents the integrated architecture
+- Jenkins validates the main services through build, test and package
+- the project remains intentionally simple, synchronous and MVP-oriented
+
+---
+
+## 14. Next Architectural Growth
+
+The next planned architectural growth is Week 3:
+
+- `user-service`
+- role modeling
+- ownership enforcement
+- buyer/seller/admin boundaries implemented more formally
+
+This is the next natural step because the current system already has enough business flow to justify explicit identity and authorization rules.
