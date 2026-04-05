@@ -1,467 +1,364 @@
 # Order Management System
 
-A backend MVP for managing customer orders, product catalog validation, and cart checkout flow, built as part of a weekly backend practice project focused on Java, Spring Boot, SQL, Docker, Jenkins, and disciplined software delivery.
+Backend MVP project built with Java and Spring Boot, designed to evolve incrementally into a portfolio-ready microservices architecture.
 
-## Overview
+The system started with `order-service` as the core domain and has been expanded week by week with new business capabilities while preserving a simple, realistic and maintainable structure.
 
-This project simulates a business order flow where customers can build a cart, validate products against a catalog, generate an order through checkout, and then continue the order lifecycle through explicit status transitions.
+At the current stage, after the completion of Week 2, the system already supports:
 
-At the current stage, the system includes:
-
-- an `order-service` as the core business service
-- a `product-service` as the source of truth for catalog data
-- a lightweight `notification-service` for order event notifications
+- product management through `product-service`
+- order creation and lifecycle through `order-service`
+- cart management inside `order-service`
+- shipment lifecycle through `shipping-service`
+- notifications through `notification-service`
 - PostgreSQL persistence
-- Docker-based local environment
-- Jenkins pipeline for build, test, and packaging automation
+- Docker Compose integration
+- Jenkins CI validation
 
-## Goals
+---
 
-The main goals of this MVP are:
+## Current Architecture
 
-- practice real-world backend development with Java and Spring Boot
-- model business rules explicitly and incrementally
-- expose clean REST APIs
-- integrate services with simple synchronous communication
-- keep the architecture realistic but not overengineered
-- containerize the system with Docker
-- automate validation with Jenkins
-- evolve weekly MVPs into portfolio-quality backend systems
+The system currently includes four services:
 
-## Current Project Stage
-
-The project is not in initial design stage anymore.
-
-Current state:
-
-- `order-service` is already implemented as the core of the system
-- `product-service` is already implemented and integrated with `order-service`
-- `notification-service` already exists as a lightweight support service
-- cart functionality was implemented **inside `order-service`**
-- Docker Compose and Jenkins are already part of the working setup
-- Week 1 is focused on closing the operational and documented version of this integrated baseline
-
-## Architecture
-
-The system is currently composed of three services.
-
-### 1. order-service
+### 1. `product-service`
 Responsible for:
 
-- creating orders
-- retrieving orders
-- handling order status transitions
-- calculating totals
-- persisting orders in PostgreSQL
-- managing cart operations
-- validating products through `product-service`
-- creating orders from validated product snapshots
-- sending notifications to `notification-service`
+- product creation
+- product updates
+- stock handling
+- active/inactive product state
+- catalog validation source for order creation and checkout
 
-### 2. product-service
-Responsible for:
+### 2. `order-service`
+Core transactional service responsible for:
 
-- creating products
-- retrieving products
-- listing products
-- updating stock
-- activating and deactivating products
-- enforcing product business rules
-- acting as the source of truth for product name, price, stock, and active status
+- cart management
+- checkout
+- order creation
+- order total calculation
+- order persistence
+- order lifecycle transitions
+- product snapshot storage
+- integration with `product-service`
+- integration with `notification-service`
 
-### 3. notification-service
-Responsible for:
+### 3. `shipping-service`
+Introduced in Week 2 to handle:
 
-- receiving order event notifications
-- storing notifications in memory
-- exposing notifications for inspection
+- shipment creation
+- shipment lifecycle transitions
+- shipment persistence
+- order validation before shipment creation
+- notification of shipment events
+- delivery-driven order shipping completion
 
-## Service Communication
+### 4. `notification-service`
+Lightweight support service that receives notification requests from other services.
 
-Current service communication is synchronous over HTTP:
+---
 
-- `order-service` calls `product-service` to validate products before direct order creation or checkout
-- `order-service` calls `notification-service` when relevant order events occur
+## Current Business Flow
 
-## Tech Stack
+The implemented happy path is:
 
-- Java 21
-- Spring Boot
-- Spring Web
-- Spring Data JPA
-- PostgreSQL
-- Docker
-- Docker Compose
-- Jenkins
-- JUnit 5
-- Mockito
-- Maven
-- H2 for tests
+1. seller creates and activates products
+2. buyer browses active products
+3. buyer adds items to cart
+4. buyer performs checkout
+5. `order-service` creates an order with status `CREATED`
+6. seller or admin confirms the order
+7. `shipping-service` creates a shipment for the confirmed order
+8. shipment moves through:
+   - `PENDING`
+   - `READY_FOR_DELIVERY`
+   - `IN_TRANSIT`
+   - `DELIVERED`
+9. when shipment reaches `DELIVERED`, `shipping-service` calls `order-service`
+10. `order-service` transitions the related order to `SHIPPED`
+11. order and shipment events are sent to `notification-service`
 
-## Project Structure
+### Important rule
+An order does **not** become `SHIPPED` directly after confirmation.  
+It becomes `SHIPPED` only when the related shipment reaches `DELIVERED`.
 
-```text
-order-management-system/
-├── README.md
-├── docker-compose.yml
-├── Jenkinsfile
-├── order-service/
-├── product-service/
-└── notification-service/
-```
+---
 
-# Core Domain
+## Order Lifecycle
 
-## Order
-Represents a customer order.
+The official order statuses are:
 
-### Main fields
-- `id`
-- `customerName`
-- `status`
-- `totalAmount`
-- `createdAt`
-- `updatedAt`
-
-## OrderItem
-Represents an item inside an order.
-
-### Main fields
-- `id`
-- `productId`
-- `productName`
-- `quantity`
-- `unitPrice`
-- `subtotal`
-
-`productName` and `unitPrice` are stored as snapshots inside the order to preserve historical purchase data, while `product-service` remains the catalog source of truth.
-
-## Cart
-Represents the current shopping cart associated with a customer.
-
-### Main fields
-- `id`
-- `customerName`
-- `items`
-
-## CartItem
-Represents an item inside a cart.
-
-### Main fields
-- `id`
-- `productId`
-- `quantity`
-
-# Order Statuses
 - `CREATED`
 - `CONFIRMED`
 - `CANCELLED`
 - `SHIPPED`
 
-# Business Rules Summary
+Allowed transitions:
 
-## Product rules
-- product name must not be blank
-- product price must be greater than zero
-- stock must not be negative
-- active must not be null
-- duplicate product names are not allowed
+- `CREATED -> CONFIRMED`
+- `CREATED -> CANCELLED`
+- `CONFIRMED -> CANCELLED`
+- `CONFIRMED -> SHIPPED`
 
-## Order rules
-- a new order starts with status `CREATED`
-- an order must contain at least one item
-- item quantity must be greater than zero
-- order total is calculated from all order items
-- products are validated through `product-service`
-- product must exist
-- product must be active
-- product must have enough stock before order creation
+### Official interpretation
+`CONFIRMED -> SHIPPED` is no longer treated as an isolated manual business step.
 
-## Order status transition rules
-- `CREATED -> CONFIRMED` is allowed
-- `CREATED -> CANCELLED` is allowed
-- `CONFIRMED -> SHIPPED` is allowed
-- `CONFIRMED -> CANCELLED` is allowed
-- `CANCELLED` is a terminal state
-- `SHIPPED` is a terminal state
+It now represents the order completion triggered by shipment delivery confirmation from `shipping-service`.
 
-## Cart rules
-- cart is implemented inside `order-service`
-- cart is currently associated with `customerName`
-- if the customer has no cart, one is created on demand
-- cart item quantity must be greater than zero
-- checkout revalidates all products against the catalog
-- checkout creates an order in `CREATED`
-- cart is cleared after a successful checkout
-- cart is ephemeral and does not keep historical states
+---
 
-# API Endpoints
+## Shipment Lifecycle
 
-## Product Service
+The official shipment statuses are:
 
-### Create product
-`POST /api/products`
+- `PENDING`
+- `READY_FOR_DELIVERY`
+- `IN_TRANSIT`
+- `DELIVERED`
+- `FAILED`
+- `CANCELLED`
 
-### Get product by id
-`GET /api/products/{id}`
+Allowed transitions:
 
-### Get all products
-`GET /api/products`
+- `PENDING -> READY_FOR_DELIVERY`
+- `READY_FOR_DELIVERY -> IN_TRANSIT`
+- `IN_TRANSIT -> DELIVERED`
+- `IN_TRANSIT -> FAILED`
+- `PENDING -> CANCELLED`
+- `READY_FOR_DELIVERY -> CANCELLED`
 
-### Update stock
-`PATCH /api/products/{id}/stock`
+Shipment transitions are exposed through command-style `PATCH` endpoints.
 
-### Activate product
-`PATCH /api/products/{id}/activate`
+Examples:
 
-### Deactivate product
-`PATCH /api/products/{id}/deactivate`
+- `/api/shipments/{id}/ready`
+- `/api/shipments/{id}/in-transit`
+- `/api/shipments/{id}/deliver`
+- `/api/shipments/{id}/fail`
+- `/api/shipments/{id}/cancel`
 
-## Order Service
+---
 
-### Create order directly
-`POST /api/orders`
+## Product Validation and Order Snapshots
 
-### Get all orders
-`GET /api/orders`
+`product-service` is the source of truth for:
 
-### Get order by id
-`GET /api/orders/{id}`
+- product existence
+- current price
+- active status
+- available stock
 
-### Confirm order
-`PATCH /api/orders/{id}/confirm`
+Before creating an order, `order-service` validates products through `product-service`.
 
-### Cancel order
-`PATCH /api/orders/{id}/cancel`
+After validation, `order-service` stores a purchase snapshot inside each `OrderItem`, including:
 
-### Ship order
-`PATCH /api/orders/{id}/ship`
+- `productId`
+- product name at purchase time
+- product price at purchase time
+- ordered quantity
 
-## Cart Endpoints
+This prevents future product changes from affecting historical orders.
 
-### Get cart
-`GET /api/cart/{customerName}`
+---
 
-### Add item to cart
-`POST /api/cart/{customerName}/items`
+## Cart Design
 
-### Update cart item quantity
-`PATCH /api/cart/{customerName}/items/{productId}`
+The cart is intentionally implemented inside `order-service`.
 
-### Remove item from cart
-`DELETE /api/cart/{customerName}/items/{productId}`
+This was a deliberate architectural decision to keep the MVP simple and avoid introducing a separate cart microservice too early.
 
-### Clear cart
-`DELETE /api/cart/{customerName}`
+The cart supports:
 
-### Checkout cart
-`POST /api/cart/{customerName}/checkout`
+- add item
+- list cart
+- update quantity
+- remove item
+- clear cart
+- checkout
 
-## Notification Service
+At the current stage, cart ownership is temporarily associated with `customerName` until `user-service` is introduced.
 
-### Create notification
-`POST /api/notifications`
+---
 
-### Get all notifications
-`GET /api/notifications`
+## Roles and Operational Ownership
 
-# Example Requests
+The project already assumes these business roles:
 
-## Create Product
-```json
-{
-"name": "Mechanical Keyboard",
-"price": 120.00,
-"stock": 10,
-"active": true
-}
-```
-## Create Order Directly
-```json
-{
-"customerName": "Juan Perez",
-"items": [{
-    "productId": 1,
-    "quantity": 2
-    }
-  ]
-}
-```
-## Add Item to Cart
-```json
-{
-"productId": 1,
-"quantity": 2
-}
-```
-# Example Flows
+- `BUYER`
+- `SELLER`
+- `ADMIN`
 
-## Direct order flow
-1. Create a product in `product-service`
-2. Create an order in `order-service` using `productId` and `quantity`
-3. `order-service` validates the product through `product-service`
-4. Order is created in `CREATED`
-5. Confirm the order
-6. Ship the order
-7. Check notifications in `notification-service`
+Formal role enforcement is planned for Week 3, but the system design already follows these ownership rules:
 
-## Cart checkout flow
-1. Create a product in `product-service`
-2. Add item to cart in `order-service`
-3. Update quantity if needed
-4. Execute checkout
-5. `order-service` revalidates products through `product-service`
-6. Order is created in `CREATED`
-7. Cart is cleared
-8. Continue normal order lifecycle
+### `BUYER`
+Can:
 
-## Alternative cancellation flow
-1. Create an order
-2. Confirm it or keep it in `CREATED`
-3. Cancel the order according to allowed transitions
-4. Check notifications in `notification-service`
+- browse active products
+- manage cart
+- checkout
+- view own orders
+- view own shipment status
 
-# Running Locally
+Cannot:
 
-## Requirements
-- Java 21
-- Maven or Maven Wrapper
-- Docker Desktop
-- PostgreSQL if running manually outside Docker
-- Jenkins (optional, for CI practice)
+- change product states
+- change order states
+- change shipment states
 
-## Running Services Manually
+### `SELLER`
+Can:
 
-### 1. Run `notification-service`
-From its folder:
-```bash
-mvnw.cmd spring-boot:run
-```
-### 2. Run `product-service`
-From its folder:
-```bash
-mvnw.cmd spring-boot:run
-```
-### 3. Run `order-service`
-From its folder:
-```bash
-mvnw.cmd spring-boot:run
-```
-Make sure PostgreSQL is running and that inter-service URLs are configured correctly.
+- manage owned products
+- manage owned operational order transitions
+- create and manage shipments for owned orders
 
-## Running with Docker Compose
+### `ADMIN`
+Can:
 
-From the project root:
+- manage all operational resources
+- perform global overrides when needed
 
-```bash
-docker compose up --build
-```
-This starts:
+---
 
-- PostgreSQL
+## Notification Model
+
+Each service emits notifications for its own domain events.
+
+### `order-service`
+Notifies events such as:
+
+- `ORDER_CONFIRMED`
+- `ORDER_CANCELLED`
+- `ORDER_SHIPPED`
+
+### `shipping-service`
+Notifies events such as:
+
+- `SHIPMENT_CREATED`
+- `SHIPMENT_READY_FOR_DELIVERY`
+- `SHIPMENT_IN_TRANSIT`
+- `SHIPMENT_DELIVERED`
+- `SHIPMENT_FAILED`
+- `SHIPMENT_CANCELLED`
+
+`notification-service` receives and processes those requests but does not own domain rules.
+
+---
+
+## Infrastructure
+
+The current infrastructure keeps the project intentionally simple and reproducible.
+
+### Database
+A single shared PostgreSQL instance is used at this stage.
+
+### Communication
+Services communicate synchronously through HTTP.
+
+### Docker
+Docker Compose currently includes:
+
+- `postgres`
 - `notification-service`
 - `product-service`
 - `order-service`
+- `shipping-service`
 
-# Running Tests
+### CI
+Jenkins currently validates the main services with:
 
-## Product service
-From the `product-service` folder:
-
-```bash
-mvnw.cmd test
-```
-## Order Service
-From the `order-service` folder
-```bash
-mvnw.cmd test
-```
-# Jenkins Pipeline
-
-The project includes a `Jenkinsfile` with a simple CI pipeline that performs:
-
-- checkout
 - build
 - test
 - package
 
-At the current stage, the pipeline validates both:
+for:
 
 - `product-service`
 - `order-service`
-
-The pipeline is intentionally simple and focused on reproducible MVP delivery.
-
-# Current MVP Scope
-
-This version currently includes:
-
-- product creation and management
-- product stock updates
-- product activation and deactivation
-- order creation using catalog validation
-- order retrieval
-- order status transitions
-- cart management inside `order-service`
-- checkout flow from cart to order
-- notification sending between services
-- PostgreSQL persistence
-- Docker setup
-- Jenkins pipeline
-- service-layer and controller-level tests for the implemented flows
-
-# Limitations
-
-This MVP keeps some things intentionally simple:
-
-- cart is associated with `customerName` because there is no `user-service` yet
-- notification data is stored in memory
-- no authentication or authorization yet
-- no pagination or filtering
-- no retry or resilience mechanism for inter-service communication
-- no event broker such as Kafka or RabbitMQ
-- no frontend
-- shared PostgreSQL setup is used for MVP simplicity
-
-# Planned Next Step
-
-According to the execution plan, the next service to be implemented after Week 1 is:
-
 - `shipping-service`
 
-Planned focus for the next stage:
+---
 
-- shipment creation rules
-- shipment lifecycle
-- assignment of confirmed orders to shipment flow
-- basic integration with `order-service`
+## Project Structure
 
-# Future Improvements
+Current repository-level structure is conceptually organized around:
 
-- add `shipping-service`
-- add `user-service`
-- add simple security with JWT or Basic Auth
-- persist notifications in a database
-- add stronger integration tests
-- add OpenAPI/Swagger documentation
-- add filtering and pagination later
-- improve CI/CD pipeline incrementally
-- add Flyway or Liquibase for database migrations
+- `product-service`
+- `order-service`
+- `shipping-service`
+- `notification-service`
+- infrastructure and documentation files
 
-# Learning Focus
+The exact internal folder depth may differ by service, but each service remains independently buildable.
 
-This project was built to practice:
+---
 
-- backend design with Spring Boot
-- business rules modeling
-- service-to-service communication
-- SQL persistence
-- incremental microservice growth
-- Docker-based local environments
-- Jenkins pipeline setup
-- production-style backend documentation
-- disciplined weekly MVP execution
+## Technology Stack
 
-# Author
+- Java 17
+- Spring Boot
+- Spring Data JPA
+- PostgreSQL
+- H2 for tests
+- Docker Compose
+- Jenkins
+- Maven
 
-Built as part of a daily MVP practice system for backend portfolio development.
+---
+
+## Current Project Status
+
+### Week 1 completed
+Week 1 closed with:
+
+- `product-service`
+- product validation integrated into `order-service`
+- cart implementation inside `order-service`
+- Docker Compose aligned with the integrated baseline
+- Jenkins validating `product-service` and `order-service`
+
+### Week 2 completed
+Week 2 closed with:
+
+- `shipping-service` implemented as a standalone microservice
+- shipment lifecycle and command-style `PATCH` endpoints
+- shipment creation restricted to confirmed orders
+- `DELIVERED -> SHIPPED` integration with `order-service`
+- shipment notifications
+- Docker Compose updated with `shipping-service`
+- Jenkins updated to validate `shipping-service`
+
+---
+
+## Current Architectural Direction
+
+The project intentionally favors:
+
+- incremental weekly delivery
+- realistic service boundaries
+- maintainability
+- visible portfolio value
+- minimal reproducible DevOps
+- business-rule clarity
+- no premature distributed-system complexity
+
+The project intentionally avoids, for now:
+
+- Kafka
+- Kubernetes
+- OAuth
+- split shipment workflows
+- advanced orchestration
+- complex deployment automation
+
+---
+
+## Next Planned Step
+
+The next planned growth is **Week 3**:
+
+- `user-service`
+- explicit `BUYER` / `SELLER` / `ADMIN` modeling
+- ownership enforcement across products, orders and shipments
+
+This is the natural next step because the system already has enough business flow to justify formal identity and authorization rules.
