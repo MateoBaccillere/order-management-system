@@ -1,0 +1,130 @@
+public class UserServiceTest {
+
+    @Mock
+    private UserRepository userRepository;
+
+    @InjectMocks
+    private UserService userService;
+
+    private User user;
+
+    @BeforeEach
+    void setUp() {
+        user = User.builder()
+                .id(1L)
+                .name("Juan Perez")
+                .email("juan@example.com")
+                .role(UserRole.BUYER)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    @Test
+    void shouldCreateUserWithDefaultBuyerRole() {
+        when(userRepository.existsByEmail("juan@example.com")).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return saved;
+        });
+
+        User result = userService.createUser("Juan Perez", "juan@example.com");
+
+        assertNotNull(result);
+        assertEquals(1L, result.getId());
+        assertEquals("Juan Perez", result.getName());
+        assertEquals("juan@example.com", result.getEmail());
+        assertEquals(UserRole.BUYER, result.getRole());
+        assertTrue(result.getActive());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+
+        User savedUser = captor.getValue();
+        assertEquals(UserRole.BUYER, savedUser.getRole());
+        assertTrue(savedUser.getActive());
+    }
+
+    @Test
+    void shouldThrowDuplicateEmailExceptionWhenEmailAlreadyExists() {
+        when(userRepository.existsByEmail("juan@example.com")).thenReturn(true);
+
+        assertThrows(DuplicateEmailException.class,
+                () -> userService.createUser("Juan Perez", "juan@example.com"));
+
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void shouldGetUserById() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        User result = userService.getById(1L);
+
+        assertNotNull(result);
+        assertEquals(1L, result.getId());
+        assertEquals("Juan Perez", result.getName());
+        assertEquals(UserRole.BUYER, result.getRole());
+    }
+
+    @Test
+    void shouldThrowUserNotFoundExceptionWhenUserDoesNotExist() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(UserNotFoundException.class, () -> userService.getById(99L));
+    }
+
+    @Test
+    void shouldReturnAllUsers() {
+        User seller = User.builder()
+                .id(2L)
+                .name("Maria Seller")
+                .email("maria@example.com")
+                .role(UserRole.SELLER)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        when(userRepository.findAll()).thenReturn(List.of(user, seller));
+
+        List<User> result = userService.getAll();
+
+        assertEquals(2, result.size());
+        assertEquals("Juan Perez", result.get(0).getName());
+        assertEquals("Maria Seller", result.get(1).getName());
+    }
+
+    @Test
+    void shouldPromoteUserToSeller() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.promoteToSeller(1L);
+
+        assertNotNull(result);
+        assertEquals(UserRole.SELLER, result.getRole());
+
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void shouldReturnTrueWhenUserExistsById() {
+        when(userRepository.existsById(1L)).thenReturn(true);
+
+        boolean result = userService.existsById(1L);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void shouldReturnRoleById() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        UserRole result = userService.getRoleById(1L);
+
+        assertEquals(UserRole.BUYER, result);
+    }
+}
