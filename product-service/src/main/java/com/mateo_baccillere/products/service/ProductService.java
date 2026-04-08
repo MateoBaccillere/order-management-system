@@ -1,9 +1,12 @@
 package com.mateo_baccillere.products.service;
 
+import com.mateo_baccillere.products.client.UserClient;
 import com.mateo_baccillere.products.dto.CreateProductRequest;
 import com.mateo_baccillere.products.dto.ProductResponse;
+import com.mateo_baccillere.products.dto.UserResponse;
 import com.mateo_baccillere.products.entity.Product;
 import com.mateo_baccillere.products.exception.BusinessException;
+import com.mateo_baccillere.products.exception.InvalidSellerException;
 import com.mateo_baccillere.products.exception.ProductNotFoundException;
 import com.mateo_baccillere.products.repository.ProductRepository;
 import org.springframework.stereotype.Service;
@@ -15,23 +18,28 @@ import java.util.List;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final UserClient userClient;
 
-    public ProductService(ProductRepository productRepository) {
+    public ProductService(ProductRepository productRepository, UserClient userClient) {
         this.productRepository = productRepository;
+        this.userClient = userClient;
     }
 
     public ProductResponse create(CreateProductRequest request) {
         validateCreateRequest(request);
+        validateSeller(request.getSellerId());
 
-        Product product = new Product(
-                request.getName().trim(),
-                normalizeDescription(request.getDescription()),
-                request.getPrice(),
-                request.getStock(),
-                request.getActive()
-        );
+        Product product = Product.builder()
+                .name(request.getName().trim())
+                .description(normalizeDescription(request.getDescription()))
+                .price(request.getPrice())
+                .stock(request.getStock())
+                .active(request.getActive())
+                .sellerId(request.getSellerId())
+                .build();
 
         Product saved = productRepository.save(product);
+
         return mapToResponse(saved);
     }
 
@@ -107,18 +115,35 @@ public class ProductService {
         }
     }
 
+    private void validateSeller(Long sellerId) {
+        UserResponse user = userClient.getUserById(sellerId);
+
+        if (user == null) {
+            throw new InvalidSellerException("Seller does not exist");
+        }
+
+        if (Boolean.FALSE.equals(user.getActive())) {
+            throw new InvalidSellerException("Seller is inactive");
+        }
+
+        if (!"SELLER".equals(user.getRole()) && !"ADMIN".equals(user.getRole())) {
+            throw new InvalidSellerException("User does not have seller permissions");
+        }
+    }
+
     private String normalizeDescription(String description) {
         return description == null ? null : description.trim();
     }
 
     private ProductResponse mapToResponse(Product product) {
-        return new ProductResponse(
-                product.getId(),
-                product.getName(),
-                product.getDescription(),
-                product.getPrice(),
-                product.getStock(),
-                product.getActive()
-        );
+        return ProductResponse.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .description(product.getDescription())
+                .price(product.getPrice())
+                .stock(product.getStock())
+                .active(product.getActive())
+                .sellerId(product.getSellerId())
+                .build();
     }
 }

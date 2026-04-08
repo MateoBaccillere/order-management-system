@@ -1,5 +1,7 @@
 package com.mateo_baccillere.products.exception;
 
+import org.mateo_baccillere.dto.ApiErrorResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import org.springframework.http.HttpStatus;
@@ -8,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestControllerAdvice
@@ -24,6 +27,17 @@ public class GlobalExceptionHandler {
         return response;
     }
 
+    @ExceptionHandler(InvalidSellerException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidSeller(InvalidSellerException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiErrorResponse.builder()
+                        .timestamp(LocalDateTime.now())
+                        .status(HttpStatus.BAD_REQUEST.value())
+                        .error("Bad Request")
+                        .message(ex.getMessage())
+                        .details(List.of())
+                        .build());
+    }
     @ExceptionHandler(BusinessException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleBusinessException(BusinessException ex) {

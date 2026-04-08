@@ -1,7 +1,9 @@
 package service;
 
+import com.mateo_baccillere.products.client.UserClient;
 import com.mateo_baccillere.products.dto.CreateProductRequest;
 import com.mateo_baccillere.products.dto.ProductResponse;
+import com.mateo_baccillere.products.dto.UserResponse;
 import com.mateo_baccillere.products.entity.Product;
 import com.mateo_baccillere.products.exception.BusinessException;
 import com.mateo_baccillere.products.exception.ProductNotFoundException;
@@ -20,33 +22,37 @@ public class ProductServiceTest {
     @Test
     void shouldCreateProductSuccessfully() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository, userClient);
+
+        UserResponse userResponse = new UserResponse();
+        userResponse.setId(1L);
+        userResponse.setRole("SELLER");
+        userResponse.setActive(true);
 
         CreateProductRequest request = buildValidRequest();
 
+        when(userClient.getUserById(anyLong())).thenReturn(userResponse);
         when(repository.existsByNameIgnoreCase("Keyboard")).thenReturn(false);
         when(repository.save(any(Product.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         ProductResponse response = service.create(request);
 
-        System.out.println("response name = " + response.getName());
-        System.out.println("response price = " + response.getPrice());
-        System.out.println("response stock = " + response.getStock());
-        System.out.println("response active = " + response.getActive());
-
         assertThat(response.getName()).isEqualTo("Keyboard");
         assertThat(response.getPrice()).isEqualByComparingTo("99.99");
         assertThat(response.getStock()).isEqualTo(10);
         assertThat(response.getActive()).isTrue();
 
+        verify(userClient).getUserById(request.getSellerId());
         verify(repository).save(any(Product.class));
     }
 
     @Test
     void shouldFailWhenNameIsBlank() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         CreateProductRequest request = buildValidRequest();
         request.setName("   ");
@@ -61,7 +67,8 @@ public class ProductServiceTest {
     @Test
     void shouldFailWhenPriceIsZero() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         CreateProductRequest request = buildValidRequest();
         request.setPrice(BigDecimal.ZERO);
@@ -76,7 +83,8 @@ public class ProductServiceTest {
     @Test
     void shouldFailWhenStockIsNegative() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         CreateProductRequest request = buildValidRequest();
         request.setStock(-1);
@@ -91,7 +99,8 @@ public class ProductServiceTest {
     @Test
     void shouldFailWhenNameAlreadyExists() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         CreateProductRequest request = buildValidRequest();
         when(repository.existsByNameIgnoreCase("Keyboard")).thenReturn(true);
@@ -106,12 +115,14 @@ public class ProductServiceTest {
     @Test
     void shouldUpdateStockSuccessfully() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         Product product = new Product(
                 "Keyboard",
                 "Mechanical keyboard",
                 new BigDecimal("99.99"),
+                1L,
                 10,
                 true
         );
@@ -128,7 +139,8 @@ public class ProductServiceTest {
     @Test
     void shouldFailWhenUpdatingNegativeStock() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         assertThatThrownBy(() -> service.updateStock(1L, -5))
                 .isInstanceOf(BusinessException.class)
@@ -141,7 +153,8 @@ public class ProductServiceTest {
     @Test
     void shouldFailWhenProductNotFound() {
         ProductRepository repository = mock(ProductRepository.class);
-        ProductService service = new ProductService(repository);
+        UserClient userClient = mock(UserClient.class);
+        ProductService service = new ProductService(repository,userClient);
 
         when(repository.findById(999L)).thenReturn(Optional.empty());
 
@@ -157,6 +170,7 @@ public class ProductServiceTest {
         request.setPrice(new BigDecimal("99.99"));
         request.setStock(10);
         request.setActive(true);
+        request.setSellerId(1L);
         return request;
     }
 }

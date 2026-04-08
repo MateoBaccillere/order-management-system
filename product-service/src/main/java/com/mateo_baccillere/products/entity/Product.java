@@ -3,6 +3,7 @@ package com.mateo_baccillere.products.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "products")
+@Builder
 public class Product {
 
     @Id
@@ -26,6 +28,9 @@ public class Product {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
+    @Column(nullable = false, name = "seller_id")
+    private Long sellerId;
+
     @Column(nullable = false)
     private Integer stock;
 
@@ -36,12 +41,25 @@ public class Product {
     public Product() {
     }
 
-    public Product(String name, String description, BigDecimal price, Integer stock, Boolean active) {
+    public Product(Long id, String name, String description, BigDecimal price, Long sellerId, Integer stock, Boolean active) {
+        this.id = id;
         this.name = name;
         this.description = description;
         this.price = price;
+        this.sellerId = sellerId;
         this.stock = stock;
         this.active = active;
+    }
+
+    public Product(String trim, String s, BigDecimal price, Long sellerId, Integer stock, Boolean active) {
+    }
+
+    public Long getSellerId() {
+        return sellerId;
+    }
+
+    public void setSellerId(Long sellerId) {
+        this.sellerId = sellerId;
     }
 
     public Long getId() {

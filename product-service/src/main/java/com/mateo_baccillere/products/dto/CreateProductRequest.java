@@ -24,6 +24,9 @@ public class CreateProductRequest {
     private String description;
 
     @NotNull
+    private Long sellerId;
+
+    @NotNull
     @DecimalMin(value = "0.01")
     private BigDecimal price;
 
